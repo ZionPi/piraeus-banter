@@ -10,4 +10,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   loadProject: (filename) => ipcRenderer.invoke("load-project", filename),
   // 删除项目
   deleteProject: (filename) => ipcRenderer.invoke("delete-project", filename),
+
+  getProjectsDir: () => ipcRenderer.invoke('get-projects-dir'),
+
 });

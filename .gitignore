@@ -52,3 +52,8 @@ backend/database.db
 *.log
 tmp/
 temp/
+
+
+voice_presets.json
+audio/*
+tts_bytedance.py

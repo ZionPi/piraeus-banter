@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
+const { protocol } = require('electron');
 const path = require("path");
 const fs = require("fs").promises;
 const fsSync = require("fs");
@@ -99,6 +100,14 @@ function createWindow() {
 // =================================================================
 
 app.whenReady().then(() => {
+  protocol.handle('media', (req) => {
+    const pathToMedia = req.url.slice('media://'.length);
+    // 处理 Windows 下可能的路径问题，并解码
+    const decodedPath = decodeURIComponent(pathToMedia);
+    // 使用 net 模块加载本地文件
+    return net.fetch(url.pathToFileURL(decodedPath).toString());
+  });
+
   createWindow();
 
   // 1. 获取项目列表
@@ -120,7 +129,7 @@ app.whenReady().then(() => {
               name: data.name || file.replace(".json", ""),
               updatedAt: data.updatedAt || Date.now(),
             });
-          } catch (e) {}
+          } catch (e) { }
         }
       }
       return projects.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -161,6 +170,10 @@ app.whenReady().then(() => {
       console.error("Load failed:", error);
       return null;
     }
+  });
+
+  ipcMain.handle('get-projects-dir', () => {
+    return PROJECTS_DIR;
   });
 
   app.on("activate", function () {

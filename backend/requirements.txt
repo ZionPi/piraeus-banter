@@ -1,0 +1,17 @@
+# Web 服务核心
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.9  # FastAPI 处理文件上传有时需要
+
+# 字节跳动 TTS 依赖
+websockets>=12.0
+requests>=2.31.0
+
+# 音频处理 (拼接、时长计算)
+pydub>=0.25.1
+
+# 谷歌 TTS 依赖 (你原来的代码用了这个)
+google-genai
+
+# 环境变量管理
+python-dotenv==1.0.1
