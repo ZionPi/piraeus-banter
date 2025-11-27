@@ -9,5 +9,9 @@ interface Window {
     loadProject: (filename: string) => Promise<any>;
     deleteProject: (filename: string) => Promise<boolean>;
     getProjectsDir: () => Promise<string>;
+    renameProject: (
+      oldFilename: string,
+      newName: string
+    ) => Promise<{ success: boolean; newFilename?: string }>;
   };
 }

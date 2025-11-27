@@ -28,7 +28,8 @@ run-backend: ## [开发] 启动 Python 后端
 
 run-frontend: ## [开发] 启动 Electron/React 前端
 	@echo "启动 Vite 前端..."
-	pnpm dev
+# 	pnpm dev
+	npm run electron:dev
 
 clean: ## [清理]
 	find . -type d -name "__pycache__" -exec rm -rf {} +

@@ -36,6 +36,7 @@ async def generate_audio(req: TTSRequest):
         app_key = req.app_key if req.app_key else config.BYTEDANCE_APPKEY
         token = req.access_token if req.access_token else config.BYTEDANCE_ACCESS_TOKEN
         
+        print(f'app_key :${app_key}')
         if not app_key:
              raise HTTPException(status_code=400, detail="Missing ByteDance AppKey")
 

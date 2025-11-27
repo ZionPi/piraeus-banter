@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useProjectStore } from "@/store/projectStore";
 import { ImportScriptModal } from "./ImportScriptModal";
-import { VoiceSelectorModal } from './VoiceSelectorModal';
-import voicePresets from '@/data/voice_presets.json';
+import { VoiceSelectorModal } from "./VoiceSelectorModal";
+import voicePresets from "@/data/voice_presets.json";
 
 export const Sidebar: React.FC = () => {
   const navigate = useNavigate();
@@ -11,7 +11,8 @@ export const Sidebar: React.FC = () => {
 
   // 从 Store 获取状态和方法
   const {
-    hostVoiceId, guestVoiceId,
+    hostVoiceId,
+    guestVoiceId,
     projectList,
     fetchAllProjects,
     loadProject,
@@ -20,22 +21,39 @@ export const Sidebar: React.FC = () => {
     hostName,
     guestName,
     updateHostName,
-    updateGuestName
+    updateGuestName,
   } = useProjectStore();
 
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
-  const [editingRole, setEditingRole] = useState<'host' | 'guest'>('host');
+  const [editingRole, setEditingRole] = useState<"host" | "guest">("host");
   // 本地 UI 状态
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [projectSearchTerm, setProjectSearchTerm] = useState("");
 
+  const { deleteProjectFile } = useProjectStore(); // 获取删除方法
+
+  const handleDelete = (
+    e: React.MouseEvent,
+    filename: string,
+    name: string
+  ) => {
+    e.stopPropagation(); // 防止触发点击加载
+    if (
+      confirm(
+        `Are you sure you want to delete "${name}"?\nThis cannot be undone.`
+      )
+    ) {
+      deleteProjectFile(filename);
+    }
+  };
+
   const getVoiceName = (id: string) => {
-    const v = voicePresets.find(v => v.id === id);
+    const v = voicePresets.find((v) => v.id === id);
     return v ? v.name : "Unknown Voice";
   };
 
   // 打开弹窗的处理函数
-  const openVoiceModal = (role: 'host' | 'guest') => {
+  const openVoiceModal = (role: "host" | "guest") => {
     setEditingRole(role);
     setVoiceModalOpen(true);
   };
@@ -167,13 +185,24 @@ export const Sidebar: React.FC = () => {
                   <div
                     key={proj.filename}
                     onClick={() => handleProjectClick(proj.filename)}
-                    className={`px-3 py-1.5 text-sm font-display rounded cursor-pointer transition-colors truncate flex justify-between items-center group/item ${currentProjectName === proj.name
-                      ? "bg-primary/10 text-primary font-bold"
-                      : "text-text-secondary hover:bg-secondary/10"
-                      }`}
+                    className={`px-3 py-1.5 text-sm font-display rounded cursor-pointer transition-colors truncate flex justify-between items-center group/item ${
+                      currentProjectName === proj.name
+                        ? "bg-primary/10 text-primary font-bold"
+                        : "text-text-secondary hover:bg-secondary/10"
+                    }`}
                     title={proj.name}
                   >
                     <span className="truncate">{proj.name}</span>
+
+                    <button
+                      onClick={(e) => handleDelete(e, proj.filename, proj.name)}
+                      className="opacity-0 group-hover/item:opacity-100 p-1 hover:bg-red-100 hover:text-red-500 rounded transition-all"
+                      title="Delete Project"
+                    >
+                      <span className="material-symbols-outlined text-xs">
+                        delete
+                      </span>
+                    </button>
                   </div>
                 ))
               )}
@@ -191,10 +220,11 @@ export const Sidebar: React.FC = () => {
               </span>
             </summary>
             <div className="flex flex-col gap-4 px-2 pt-2 pb-4">
-
               {/* ▼▼▼ 新增：Host 名字输入框 ▼▼▼ */}
               <label className="flex flex-col w-full">
-                <p className="font-display text-sm font-semibold leading-normal pb-1 text-text-secondary">Host Name</p>
+                <p className="font-display text-sm font-semibold leading-normal pb-1 text-text-secondary">
+                  Host Name
+                </p>
                 <input
                   type="text"
                   value={hostName}
@@ -205,20 +235,26 @@ export const Sidebar: React.FC = () => {
 
               {/* Host Voice Selector - 改为按钮 */}
               <div className="flex flex-col w-full">
-                <p className="font-display text-sm font-semibold leading-normal pb-2 text-text-secondary">Host Voice</p>
+                <p className="font-display text-sm font-semibold leading-normal pb-2 text-text-secondary">
+                  Host Voice
+                </p>
                 <button
-                  onClick={() => openVoiceModal('host')}
+                  onClick={() => openVoiceModal("host")}
                   className="w-full flex items-center justify-between px-3 py-2 bg-background-light border border-secondary/50 rounded-lg shadow-sm hover:border-primary hover:bg-white transition-all text-left group/btn"
                 >
                   <span className="font-display text-sm text-text-primary group-hover/btn:text-primary font-bold">
                     {getVoiceName(hostVoiceId)}
                   </span>
-                  <span className="material-symbols-outlined text-lg text-text-secondary group-hover/btn:text-primary">tune</span>
+                  <span className="material-symbols-outlined text-lg text-text-secondary group-hover/btn:text-primary">
+                    tune
+                  </span>
                 </button>
               </div>
 
               <label className="flex flex-col w-full mt-2">
-                <p className="font-display text-sm font-semibold leading-normal pb-1 text-text-secondary">Guest Name</p>
+                <p className="font-display text-sm font-semibold leading-normal pb-1 text-text-secondary">
+                  Guest Name
+                </p>
                 <input
                   type="text"
                   value={guestName}
@@ -229,15 +265,19 @@ export const Sidebar: React.FC = () => {
 
               {/* Guest Voice Selector - 改为按钮 */}
               <div className="flex flex-col w-full">
-                <p className="font-display text-sm font-semibold leading-normal pb-2 text-text-secondary">Guest Voice</p>
+                <p className="font-display text-sm font-semibold leading-normal pb-2 text-text-secondary">
+                  Guest Voice
+                </p>
                 <button
-                  onClick={() => openVoiceModal('guest')}
+                  onClick={() => openVoiceModal("guest")}
                   className="w-full flex items-center justify-between px-3 py-2 bg-background-light border border-secondary/50 rounded-lg shadow-sm hover:border-primary hover:bg-white transition-all text-left group/btn"
                 >
                   <span className="font-display text-sm text-text-primary group-hover/btn:text-primary font-bold">
                     {getVoiceName(guestVoiceId)}
                   </span>
-                  <span className="material-symbols-outlined text-lg text-text-secondary group-hover/btn:text-primary">tune</span>
+                  <span className="material-symbols-outlined text-lg text-text-secondary group-hover/btn:text-primary">
+                    tune
+                  </span>
                 </button>
               </div>
 

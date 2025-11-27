@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // 删除项目
   deleteProject: (filename) => ipcRenderer.invoke("delete-project", filename),
 
-  getProjectsDir: () => ipcRenderer.invoke('get-projects-dir'),
+  getProjectsDir: () => ipcRenderer.invoke("get-projects-dir"),
 
+  renameProject: (oldFilename, newName) =>
+    ipcRenderer.invoke("rename-project", { oldFilename, newName }),
 });

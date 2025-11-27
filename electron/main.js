@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
-const { protocol } = require('electron');
+const { protocol } = require("electron");
 const path = require("path");
 const fs = require("fs").promises;
 const fsSync = require("fs");
@@ -100,8 +100,8 @@ function createWindow() {
 // =================================================================
 
 app.whenReady().then(() => {
-  protocol.handle('media', (req) => {
-    const pathToMedia = req.url.slice('media://'.length);
+  protocol.handle("media", (req) => {
+    const pathToMedia = req.url.slice("media://".length);
     // 处理 Windows 下可能的路径问题，并解码
     const decodedPath = decodeURIComponent(pathToMedia);
     // 使用 net 模块加载本地文件
@@ -129,7 +129,7 @@ app.whenReady().then(() => {
               name: data.name || file.replace(".json", ""),
               updatedAt: data.updatedAt || Date.now(),
             });
-          } catch (e) { }
+          } catch (e) {}
         }
       }
       return projects.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -172,8 +172,50 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('get-projects-dir', () => {
+  ipcMain.handle("get-projects-dir", () => {
     return PROJECTS_DIR;
+  });
+
+  // 4. 删除项目
+  ipcMain.handle("delete-project", async (event, filename) => {
+    try {
+      const filePath = path.join(PROJECTS_DIR, filename);
+      await fs.unlink(filePath); // 删除文件
+      return true;
+    } catch (error) {
+      console.error("Delete failed:", error);
+      return false;
+    }
+  });
+
+  // 5. 重命名项目
+  ipcMain.handle("rename-project", async (event, { oldFilename, newName }) => {
+    try {
+      const safeName = newName.replace(/[^a-z0-9_\-]/gi, "_");
+      const newFilename = `${safeName}.json`;
+
+      const oldPath = path.join(PROJECTS_DIR, oldFilename);
+      const newPath = path.join(PROJECTS_DIR, newFilename);
+
+      // 如果新名字和旧名字不一样，且新名字文件不存在，则重命名
+      if (oldPath !== newPath) {
+        if (fsSync.existsSync(newPath)) {
+          throw new Error("Filename already exists");
+        }
+        await fs.rename(oldPath, newPath);
+
+        // 同时读取并更新文件内部的 "name" 字段
+        const content = await fs.readFile(newPath, "utf-8");
+        const data = JSON.parse(content);
+        data.name = newName; // 更新内部名字
+        await fs.writeFile(newPath, JSON.stringify(data, null, 2), "utf-8");
+      }
+
+      return { success: true, newFilename };
+    } catch (error) {
+      console.error("Rename failed:", error);
+      return { success: false, error: error.message };
+    }
   });
 
   app.on("activate", function () {
