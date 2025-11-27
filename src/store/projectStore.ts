@@ -36,6 +36,10 @@ interface ProjectState {
   isPlaying: boolean;
   currentPlayingId: string | null;
 
+  isExportModalOpen: boolean;
+  openExportModal: () => void;
+  closeExportModal: () => void;
+
   // ... (动作定义不变)
   clearWorkspace: () => void;
   addBubble: (role: "host" | "guest") => void;
@@ -56,6 +60,8 @@ interface ProjectState {
   deleteProjectFile: (filename: string) => Promise<void>;
 
   togglePlayback: () => void;
+
+  exportFullAudio: () => Promise<string | null>; // 返回导出的文件路径
 }
 
 // 辅助函数：检查文本是否包含有效语音内容 (汉字、字母、数字)
@@ -63,8 +69,15 @@ const hasValidSpeech = (text: string) => {
   return /[a-zA-Z0-9\u4e00-\u9fa5]/.test(text);
 };
 
+
+// 辅助函数：净化文件名 (放在文件顶部或者 generateAudio 内部)
+const sanitizeName = (name: string) => name.replace(/[^a-z0-9_\u4e00-\u9fa5\-]/gi, '_');
 // 辅助函数：睡眠
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+let audioPlayer: HTMLAudioElement | null = null;
+let playlist: Bubble[] = [];
+let currentPlaylistIndex = -1;
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   // ... (初始状态保持不变)
@@ -79,6 +92,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   isPlaying: false,
   currentPlayingId: null,
+  isExportModalOpen: false,
+
+  openExportModal: () => set({ isExportModalOpen: true }),
+  closeExportModal: () => set({ isExportModalOpen: false }),
 
   // ... (addBubble, updateBubbleContent, deleteBubble, updateHostName, updateGuestName, setVoice 保持不变)
   addBubble: (role) =>
@@ -239,6 +256,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+
   // ✅ 优化：单条生成逻辑 (增加内容检查)
   generateAudio: async (bubbleId) => {
     const state = get();
@@ -251,10 +269,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         bubbles: state.bubbles.map((b) =>
           b.id === bubbleId
             ? {
-                ...b,
-                status: "error",
-                errorMessage: "No speech content",
-              }
+              ...b,
+              status: "error",
+              errorMessage: "No speech content",
+            }
             : b
         ),
       }));
@@ -278,6 +296,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const speakerId =
         bubble.role === "host" ? state.hostVoiceId : state.guestVoiceId;
 
+      const uniqueFileId = `${sanitizeName(state.currentProjectName)}_${bubble.id}`;
+
       const response = await fetch("http://127.0.0.1:8000/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -285,7 +305,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           text: bubble.content,
           speaker: speakerId,
           project_path: projectsDir,
-          bubble_id: bubble.id,
+          bubble_id: uniqueFileId,
           app_key: "",
           access_token: "",
         }),
@@ -303,11 +323,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           bubbles: state.bubbles.map((b) =>
             b.id === bubbleId
               ? {
-                  ...b,
-                  status: "success",
-                  audioPath: data.audio_path,
-                  duration: data.duration,
-                }
+                ...b,
+                status: "success",
+                audioPath: data.audio_path,
+                duration: data.duration,
+              }
               : b
           ),
         }));
@@ -318,10 +338,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         bubbles: state.bubbles.map((b) =>
           b.id === bubbleId
             ? {
-                ...b,
-                status: "error",
-                errorMessage: "Failed",
-              }
+              ...b,
+              status: "error",
+              errorMessage: "Failed",
+            }
             : b
         ),
       }));
@@ -441,18 +461,141 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   togglePlayback: () => {
-    set((state) => ({
-      isPlaying: !state.isPlaying,
-    }));
-
-    // 这里是未来写真实播放逻辑的地方
     const state = get();
+
+    // 1. 如果正在播放 -> 暂停
     if (state.isPlaying) {
-      console.log("▶️ Playback Started (or Resumed)");
-      // TODO: 找到播放列表，从头或从当前位置开始播放
-    } else {
-      console.log("⏸️ Playback Paused");
-      // TODO: 暂停当前的 HTMLAudioElement
+      if (audioPlayer) audioPlayer.pause();
+      set({ isPlaying: false });
+      return;
     }
+
+    // 2. 如果暂停中 -> 恢复
+    if (audioPlayer && audioPlayer.readyState > 0 && !audioPlayer.ended) {
+      audioPlayer.play();
+      set({ isPlaying: true });
+      return;
+    }
+
+    // 3. 否则 -> 从头开始播放
+    // 筛选出所有“已生成”的气泡
+    playlist = state.bubbles.filter(b => b.status === 'success' && b.audioPath);
+
+    if (playlist.length === 0) {
+      alert("Please generate audio first.");
+      return;
+    }
+
+    currentPlaylistIndex = 0;
+
+    // 递归播放函数
+    const playNextTrack = () => {
+      // 检查边界
+      if (currentPlaylistIndex >= playlist.length) {
+        console.log("Playback finished.");
+        set({ isPlaying: false, currentPlayingId: null });
+        audioPlayer = null;
+        return;
+      }
+
+      const bubble = playlist[currentPlaylistIndex];
+      set({ isPlaying: true, currentPlayingId: bubble.id });
+
+      // 使用 media:// 协议 (注意 Windows 路径转换)
+      const normalizedPath = bubble.audioPath!.replace(/\\/g, '/');
+      const audioUrl = `media://${normalizedPath}?t=${Date.now()}`;
+
+      // 清理旧监听器
+      if (audioPlayer) {
+        audioPlayer.onended = null;
+        audioPlayer.onerror = null;
+      }
+
+      audioPlayer = new Audio(audioUrl);
+
+      // 监听播放结束 -> 播下一个
+      audioPlayer.onended = () => {
+        currentPlaylistIndex++;
+        playNextTrack();
+      };
+
+      // 监听错误 -> 跳过，播下一个
+      audioPlayer.onerror = (e) => {
+        console.error("Playback error for bubble:", bubble.id, e);
+        currentPlaylistIndex++;
+        playNextTrack();
+      };
+
+      // 开始播放
+      audioPlayer.play().catch(e => {
+        console.error("Play failed:", e);
+        set({ isPlaying: false });
+      });
+    };
+
+    // 启动
+    playNextTrack();
   },
+
+  exportFullAudio: async () => {
+    const state = get();
+
+    // 1. ▼▼▼ 检查是否有“掉队”的气泡 ▼▼▼
+    const totalBubbles = state.bubbles.length;
+    // 有效气泡：必须是 success 且有路径
+    const validBubbles = state.bubbles.filter(b => b.status === 'success' && b.audioPath);
+    const missingCount = totalBubbles - validBubbles.length;
+
+    if (validBubbles.length === 0) {
+      alert("No audio generated yet. Please generate audio first.");
+      return null;
+    }
+
+    // 如果有未生成的，弹窗警告用户
+    if (missingCount > 0) {
+      const confirmExport = confirm(
+        `⚠️ Warning: ${missingCount} bubbles are NOT generated yet.\n\nThey will be skipped in the export.\nDo you want to continue?`
+      );
+      if (!confirmExport) return null; // 用户取消
+    }
+
+    const audioFiles = validBubbles.map(b => b.audioPath!);
+
+    try {
+      if (!window.electronAPI) return null;
+
+      const defaultName = `${state.currentProjectName}_Full.mp3`;
+      const savePath = await window.electronAPI.showSaveDialog(defaultName);
+
+      if (!savePath) return null; // 用户点击了取消
+
+      let projectsDir = await window.electronAPI.getProjectsDir();
+
+      // 3. 调用后端 (传入用户选择的 savePath)
+      const response = await fetch('http://127.0.0.1:8000/api/export/audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_path: projectsDir,
+          audio_files: audioFiles,
+          output_path: savePath, // <--- 传绝对路径
+          gap_ms: 300
+        }),
+      });
+
+      if (!response.ok) throw new Error("Export API Failed");
+
+      const data = await response.json();
+      if (data.success) {
+        return data.output_path;
+      }
+
+    } catch (e) {
+      console.error("Export error:", e);
+      alert("Export failed.");
+    }
+    return null;
+  }
+
+
 }));

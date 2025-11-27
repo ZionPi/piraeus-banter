@@ -5,6 +5,7 @@ import os
 import uvicorn
 from backend.tts_bytedance import save_audio_to_file
 from backend.config import config
+from backend.media_utils import merge_audio_files 
 
 app = FastAPI()
 
@@ -16,6 +17,12 @@ app.add_middleware(
     allow_headers=["*"],  # 允许所有 Header
 )
 
+class ExportRequest(BaseModel):
+    project_path: str       # 暂时保留，可能用于读取素材
+    audio_files: list[str]
+    output_path: str        # ▼▼▼ 修改：直接接收完整的输出路径 ▼▼▼
+    gap_ms: int = 500
+    
 # 定义请求体格式
 class TTSRequest(BaseModel):
     text: str
@@ -29,6 +36,34 @@ class TTSRequest(BaseModel):
 def read_root():
     return {"status": "Piraeus Banter Backend is Running"}
 
+@app.post("/api/export/audio")
+async def export_audio(req: ExportRequest):
+    try:
+        # 构造输出路径: project/output/final_xxx.mp3
+        # output_dir = os.path.join(req.project_path, "output")
+        # output_path = os.path.join(output_dir, req.output_name)
+        
+        output_path = req.output_path
+        # 调用工具函数
+        success, count = merge_audio_files(
+            req.audio_files, 
+            output_path, 
+            gap_ms=req.gap_ms
+        )
+        
+        if success:
+            return {
+                "success": True, 
+                "output_path": output_path,
+                "count": count
+            }
+        else:
+            raise HTTPException(status_code=400, detail="No valid audio files to merge")
+
+    except Exception as e:
+        print(f"Export failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.post("/api/generate")
 async def generate_audio(req: TTSRequest):
     try:

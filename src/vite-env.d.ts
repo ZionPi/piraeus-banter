@@ -9,6 +9,8 @@ interface Window {
     loadProject: (filename: string) => Promise<any>;
     deleteProject: (filename: string) => Promise<boolean>;
     getProjectsDir: () => Promise<string>;
+    showSaveDialog: (defaultName: string) => Promise<string | null>;
+
     renameProject: (
       oldFilename: string,
       newName: string

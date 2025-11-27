@@ -15,4 +15,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   renameProject: (oldFilename, newName) =>
     ipcRenderer.invoke("rename-project", { oldFilename, newName }),
+
+  showSaveDialog: (defaultName) => ipcRenderer.invoke('show-save-dialog', defaultName),
+
 });

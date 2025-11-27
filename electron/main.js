@@ -1,10 +1,10 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
-const { protocol } = require("electron");
+const { app, BrowserWindow, ipcMain, protocol, net } = require('electron');
 const path = require("path");
 const fs = require("fs").promises;
 const fsSync = require("fs");
 const os = require("os");
-
+const url = require('url');
+const { dialog } = require('electron');
 // =================================================================
 // 1. WSL2 / Linux 核心崩溃修复补丁 (必须放在最前面)
 // =================================================================
@@ -69,6 +69,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.js"), // 确保 preload.js 存在
       sandbox: false, // 配合 WSL2 禁用沙盒
+      webSecurity: false
     },
   });
 
@@ -100,12 +101,41 @@ function createWindow() {
 // =================================================================
 
 app.whenReady().then(() => {
-  protocol.handle("media", (req) => {
-    const pathToMedia = req.url.slice("media://".length);
-    // 处理 Windows 下可能的路径问题，并解码
-    const decodedPath = decodeURIComponent(pathToMedia);
-    // 使用 net 模块加载本地文件
-    return net.fetch(url.pathToFileURL(decodedPath).toString());
+  protocol.handle('media', (req) => {
+    try {
+      let requestUrl = req.url;
+
+      // 1. 打印原始请求，看看有没有带 ?t=...
+      console.log('>>> [Media Req Raw]:', requestUrl);
+
+      // 2. 剥离 query 参数 (比如 ?t=17123884)
+      const queryIndex = requestUrl.indexOf('?');
+      if (queryIndex !== -1) {
+        requestUrl = requestUrl.slice(0, queryIndex);
+      }
+
+      // 3. 提取路径
+      let pathToMedia = requestUrl.slice('media://'.length);
+
+      // 4. 解码 (处理空格 %20)
+      pathToMedia = decodeURIComponent(pathToMedia);
+
+      // 5. Windows 兼容修复
+      if (process.platform === 'win32' && pathToMedia.startsWith('/') && !pathToMedia.startsWith('//')) {
+        pathToMedia = pathToMedia.slice(1);
+      }
+
+      // 6. 打印最终解析路径
+      console.log('>>> [Media Path Final]:', pathToMedia);
+
+      // 7. 加载文件
+      const fileUrl = url.pathToFileURL(pathToMedia).toString();
+      return net.fetch(fileUrl);
+
+    } catch (error) {
+      console.error('>>> [Media Error]:', error);
+      return new Response('Failed to load media', { status: 500 });
+    }
   });
 
   createWindow();
@@ -129,7 +159,7 @@ app.whenReady().then(() => {
               name: data.name || file.replace(".json", ""),
               updatedAt: data.updatedAt || Date.now(),
             });
-          } catch (e) {}
+          } catch (e) { }
         }
       }
       return projects.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -158,6 +188,19 @@ app.whenReady().then(() => {
       console.error("Save failed:", error);
       return { success: false, error: error.message };
     }
+  });
+
+  ipcMain.handle('show-save-dialog', async (event, defaultName) => {
+    const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Audio',
+      defaultPath: defaultName,
+      filters: [
+        { name: 'MP3 Audio', extensions: ['mp3'] }
+      ]
+    });
+
+    if (canceled) return null;
+    return filePath;
   });
 
   // 3. 加载项目

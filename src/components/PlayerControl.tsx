@@ -4,7 +4,7 @@ import { cn } from "@/utils/cn";
 
 export const PlayerControl: React.FC = () => {
   // 2. 从 Store 获取状态和方法
-  const { isPlaying, togglePlayback } = useProjectStore();
+  const { isPlaying, togglePlayback, openExportModal } = useProjectStore();
 
   return (
     <footer className="flex h-20 w-full flex-shrink-0 items-center justify-between border-t border-secondary/30 bg-surface px-6 shadow-[0_-2px_10px_rgba(0,0,0,0.03)] select-none">
@@ -60,13 +60,19 @@ export const PlayerControl: React.FC = () => {
 
       {/* 导出按钮 (保持不变) */}
       <div className="flex items-center gap-3 w-1/4 justify-end">
-        <button className="px-3 py-1.5 text-xs font-bold border border-secondary text-text-secondary hover:bg-secondary/20 hover:text-text-primary transition-colors rounded-lg">
-          <span className="material-symbols-outlined text-sm align-bottom mr-1">
-            subtitles
-          </span>
+        <button
+          className="px-3 py-1.5 text-xs font-bold border border-secondary text-text-secondary hover:bg-secondary/20 hover:text-text-primary transition-colors rounded-lg"
+          onClick={() => alert("SRT export coming soon!")} // 暂时留空或绑定到后续的 SRT 逻辑
+        >
+          <span className="material-symbols-outlined text-sm align-bottom mr-1">subtitles</span>
           .SRT
         </button>
-        <button className="px-4 py-1.5 text-xs font-bold bg-primary text-background-light hover:bg-opacity-90 transition-colors rounded-lg shadow-md flex items-center gap-1">
+
+        {/* ▼▼▼ 绑定点击事件 ▼▼▼ */}
+        <button
+          onClick={openExportModal}
+          className="px-4 py-1.5 text-xs font-bold bg-primary text-background-light hover:bg-opacity-90 transition-colors rounded-lg shadow-md flex items-center gap-1"
+        >
           <span className="material-symbols-outlined text-sm">movie</span>
           Export Video
         </button>
