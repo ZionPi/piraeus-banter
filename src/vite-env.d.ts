@@ -15,5 +15,8 @@ interface Window {
       oldFilename: string,
       newName: string
     ) => Promise<{ success: boolean; newFilename?: string }>;
+
+    saveAppConfig: (config: any) => Promise<boolean>;
+    getAppConfig: () => Promise<any>;
   };
 }

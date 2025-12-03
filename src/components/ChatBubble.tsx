@@ -8,7 +8,7 @@ interface ChatBubbleProps {
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({ data }) => {
   // 1. 获取 currentPlayingId
-  const { updateBubbleContent, deleteBubble, generateAudio, currentPlayingId } = useProjectStore();
+  const { updateBubbleContent, deleteBubble, generateAudio, currentPlayingId, playSingleBubble } = useProjectStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
 
@@ -48,22 +48,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({ data }) => {
 
   const handlePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (data.audioPath) {
-      // 统一斜杠方向
-      const normalizedPath = data.audioPath.replace(/\\/g, '/');
-
-      // ▼▼▼ 必须是 media:// 并且带上时间戳 ▼▼▼
-      const audioUrl = `media://${normalizedPath}?t=${Date.now()}`;
-
-      console.log("Playing URL:", audioUrl); // 前端日志
-
-      const audio = new Audio(audioUrl);
-      audio.play().catch(err => {
-        console.error("Play error:", err);
-        alert("无法播放音频");
-      });
-    }
+    // 不再自己 new Audio，而是交给 Store 统一管理
+    playSingleBubble(data.id);
   };
+
   return (
     <div
       ref={bubbleRef} // 绑定 ref 用于滚动

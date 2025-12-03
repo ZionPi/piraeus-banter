@@ -37,6 +37,9 @@ interface ProjectState {
   currentPlayingId: string | null;
 
   isExportModalOpen: boolean;
+  scrollPosition: number;
+  setScrollPosition: (pos: number) => void;
+
   openExportModal: () => void;
   closeExportModal: () => void;
 
@@ -62,6 +65,11 @@ interface ProjectState {
   togglePlayback: () => void;
 
   exportFullAudio: () => Promise<string | null>; // 返回导出的文件路径
+
+  playSingleBubble: (bubbleId: string) => void;
+
+  restoreSession: () => Promise<void>;
+
 }
 
 // 辅助函数：检查文本是否包含有效语音内容 (汉字、字母、数字)
@@ -89,11 +97,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   hostVoiceId: "zh_female_inspirational",
   guestVoiceId: "zh_male_huolijieshuo",
   recentVoiceIds: ["zh_female_inspirational", "zh_male_huolijieshuo"],
-
+  scrollPosition: 0, // 默认为 0 (顶部)
   isPlaying: false,
   currentPlayingId: null,
   isExportModalOpen: false,
 
+  setScrollPosition: (pos) => set({ scrollPosition: pos }),
   openExportModal: () => set({ isExportModalOpen: true }),
   closeExportModal: () => set({ isExportModalOpen: false }),
 
@@ -192,11 +201,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!window.electronAPI) return;
     const data = await window.electronAPI.loadProject(filename);
     if (data) {
-      // 修复逻辑：如果有气泡卡在 'loading' 状态 (可能是意外退出导致)，重置为 'idle'
-      const fixedBubbles = (data.bubbles || []).map((b: Bubble) => ({
-        ...b,
-        status: b.status === "loading" ? "idle" : b.status,
-      }));
+      if (audioPlayer) { audioPlayer.pause(); audioPlayer = null; }
+
+      const fixedBubbles = (data.bubbles || []).map((b: any) => ({ ...b, status: b.status === 'loading' ? 'idle' : b.status }));
 
       set({
         currentProjectName: data.name,
@@ -206,6 +213,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         hostVoiceId: data.hostVoiceId || "zh_female_inspirational",
         guestVoiceId: data.guestVoiceId || "zh_male_huolijieshuo",
         recentVoiceIds: data.recentVoiceIds || [],
+        isPlaying: false,
+        currentPlayingId: null,
+        scrollPosition: data.scrollPosition || 0
       });
     }
   },
@@ -223,6 +233,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         guestVoiceId: state.guestVoiceId,
         recentVoiceIds: state.recentVoiceIds,
         bubbles: state.bubbles,
+        scrollPosition: state.scrollPosition
       };
       await window.electronAPI.saveProject(projectData);
       await get().fetchAllProjects();
@@ -503,7 +514,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
       // 使用 media:// 协议 (注意 Windows 路径转换)
       const normalizedPath = bubble.audioPath!.replace(/\\/g, '/');
-      const audioUrl = `media://${normalizedPath}?t=${Date.now()}`;
+      const encodedPath = encodeURI(normalizedPath);
+      const audioUrl = `media://${encodedPath}?t=${Date.now()}`;
 
       // 清理旧监听器
       if (audioPlayer) {
@@ -535,6 +547,57 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     // 启动
     playNextTrack();
+  },
+
+  playSingleBubble: (bubbleId) => {
+    const state = get();
+    const bubble = state.bubbles.find(b => b.id === bubbleId);
+
+    if (!bubble || !bubble.audioPath) return;
+
+    // 1. 如果点击的是当前正在播放的气泡 -> 执行 暂停/恢复 逻辑
+    if (state.currentPlayingId === bubbleId && audioPlayer) {
+      if (state.isPlaying) {
+        audioPlayer.pause();
+        set({ isPlaying: false });
+      } else {
+        audioPlayer.play();
+        set({ isPlaying: true });
+      }
+      return;
+    }
+
+    // 2. 如果点击的是新气泡 -> 停止上一个，播放新的
+    if (audioPlayer) {
+      audioPlayer.pause();
+      // 清除之前的事件监听，防止触发“自动播放下一首”
+      audioPlayer.onended = null;
+      audioPlayer.onerror = null;
+    }
+
+    // 3. 创建新播放器
+    const normalizedPath = bubble.audioPath.replace(/\\/g, '/');
+    const encodedPath = encodeURI(normalizedPath); // 或者 encodeURIComponent(normalizedPath) 根据你之前的调试结果
+    // 记得带上时间戳防缓存
+    const audioUrl = `media://${encodedPath}?t=${Date.now()}`;
+
+    console.log("Playing Single:", audioUrl);
+
+    audioPlayer = new Audio(audioUrl);
+
+    // 4. 设置监听器 (单曲播放结束 -> 停止状态)
+    audioPlayer.onended = () => {
+      set({ isPlaying: false, currentPlayingId: null });
+    };
+
+    audioPlayer.onerror = (e) => {
+      console.error("Play error:", e);
+      set({ isPlaying: false, currentPlayingId: null });
+    };
+
+    // 5. 播放并更新状态
+    audioPlayer.play();
+    set({ isPlaying: true, currentPlayingId: bubbleId });
   },
 
   exportFullAudio: async () => {
@@ -595,7 +658,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       alert("Export failed.");
     }
     return null;
-  }
+  },
+
+  restoreSession: async () => {
+    if (!window.electronAPI) return;
+
+    // 获取配置
+    const config = await window.electronAPI.getAppConfig();
+    const lastOpened = config.lastOpenedFilename;
+
+    if (lastOpened) {
+      console.log("Restoring last session:", lastOpened);
+      // 尝试加载
+      await get().loadProject(lastOpened);
+    } else {
+      // 如果没有记录，或者第一次运行，可以加载列表里的第一个，或者新建
+      // 这里暂不处理，保持空白或默认
+    }
+  },
+
 
 
 }));

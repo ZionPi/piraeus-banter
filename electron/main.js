@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, protocol, net } = require('electron');
+
 const path = require("path");
 const fs = require("fs").promises;
 const fsSync = require("fs");
@@ -43,6 +44,7 @@ process.env["ELECTRON_DISABLE_SECURITY_WARNINGS"] = "true";
 // 定义项目存储根目录
 const PROJECTS_DIR = path.join(app.getPath("userData"), "Projects");
 console.log(">>> Project Directory:", PROJECTS_DIR);
+const CONFIG_FILE = path.join(PROJECTS_DIR, 'app-config.json');
 
 // 确保目录存在
 try {
@@ -96,45 +98,85 @@ function createWindow() {
   });
 }
 
+
 // =================================================================
 // 4. IPC 通信接口 (文件读写)
 // =================================================================
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'media',
+    privileges: {
+      standard: true,    // 表现得像标准协议 (http)
+      secure: true,      // 视为安全上下文 (https)
+      supportFetchAPI: true,
+      bypassCSP: true,   // 绕过内容安全策略
+      stream: true       // 支持流式传输 (音频视频必须)
+    }
+  }
+]);
+
 app.whenReady().then(() => {
-  protocol.handle('media', (req) => {
+  // 使用 fs 直接读取，绕过 net.fetch 的潜在 Bug
+  protocol.handle('media', async (req) => {
     try {
       let requestUrl = req.url;
 
-      // 1. 打印原始请求，看看有没有带 ?t=...
-      console.log('>>> [Media Req Raw]:', requestUrl);
-
-      // 2. 剥离 query 参数 (比如 ?t=17123884)
+      // 1. 去掉 query 参数 (?t=...)
       const queryIndex = requestUrl.indexOf('?');
       if (queryIndex !== -1) {
         requestUrl = requestUrl.slice(0, queryIndex);
       }
 
-      // 3. 提取路径
-      let pathToMedia = requestUrl.slice('media://'.length);
+      // 2. 核心修复：使用正则去掉协议头和所有开头的斜杠
+      // 无论前端传 media://Users 还是 media:///Users，这里都会变成 "Users/zhanngpenng/..."
+      let pathToMedia = requestUrl.replace(/^media:\/*/, '');
 
-      // 4. 解码 (处理空格 %20)
+      // 3. 解码 (处理中文和空格)
       pathToMedia = decodeURIComponent(pathToMedia);
 
-      // 5. Windows 兼容修复
-      if (process.platform === 'win32' && pathToMedia.startsWith('/') && !pathToMedia.startsWith('//')) {
-        pathToMedia = pathToMedia.slice(1);
+      // 4. 重组绝对路径
+      if (process.platform === 'win32') {
+        // Windows: 如果没有盘符，可能需要处理，但通常路径里包含盘符
+        // 这里保持原样或根据实际情况微调
+      } else {
+        // macOS/Linux: 必须以 / 开头
+        // 现在的 pathToMedia 是 "Users/zhanngpenng/..."，我们补上开头的 "/"
+        if (!pathToMedia.startsWith('/')) {
+          pathToMedia = '/' + pathToMedia;
+        }
       }
 
-      // 6. 打印最终解析路径
-      console.log('>>> [Media Path Final]:', pathToMedia);
+      // 5. 调试日志 (现在的路径应该是完美的 /Users/...)
+      const fileExists = fsSync.existsSync(pathToMedia);
+      console.log(`>>> [Media Load] Raw: "${req.url}"`);
+      console.log(`>>> [Media Load] Final: "${pathToMedia}" | Exists: ${fileExists}`);
 
-      // 7. 加载文件
-      const fileUrl = url.pathToFileURL(pathToMedia).toString();
-      return net.fetch(fileUrl);
+      if (!fileExists) {
+        console.error('>>> [Media Error] File not found on disk.');
+        return new Response('File not found', { status: 404 });
+      }
+
+      // 6. 读取文件
+      const data = await fs.readFile(pathToMedia);
+      const ext = path.extname(pathToMedia).toLowerCase();
+      let mimeType = 'audio/mpeg';
+      if (ext === '.wav') mimeType = 'audio/wav';
+      if (ext === '.ogg') mimeType = 'audio/ogg';
+
+      return new Response(data, {
+        status: 200,
+        headers: {
+          'Content-Type': mimeType,
+          'Content-Length': data.length.toString(),
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-cache'
+        }
+      });
 
     } catch (error) {
       console.error('>>> [Media Error]:', error);
-      return new Response('Failed to load media', { status: 500 });
+      return new Response('Internal Error', { status: 500 });
     }
   });
 
@@ -260,6 +302,36 @@ app.whenReady().then(() => {
       return { success: false, error: error.message };
     }
   });
+
+  ipcMain.handle('save-app-config', async (event, config) => {
+    try {
+      // 读取旧配置以支持增量更新
+      let currentConfig = {};
+      if (fsSync.existsSync(CONFIG_FILE)) {
+        const content = await fs.readFile(CONFIG_FILE, 'utf-8');
+        currentConfig = JSON.parse(content);
+      }
+      const newConfig = { ...currentConfig, ...config };
+      await fs.writeFile(CONFIG_FILE, JSON.stringify(newConfig, null, 2), 'utf-8');
+      return true;
+    } catch (e) {
+      console.error('Save config failed:', e);
+      return false;
+    }
+  });
+
+  // ▼▼▼ 新增：获取应用配置 ▼▼▼
+  ipcMain.handle('get-app-config', async () => {
+    try {
+      if (!fsSync.existsSync(CONFIG_FILE)) return {};
+      const content = await fs.readFile(CONFIG_FILE, 'utf-8');
+      return JSON.parse(content);
+    } catch (e) {
+      return {};
+    }
+  });
+
+
 
   app.on("activate", function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

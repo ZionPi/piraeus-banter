@@ -16,12 +16,15 @@ export const Sidebar: React.FC = () => {
     projectList,
     fetchAllProjects,
     loadProject,
+    restoreSession,
     currentProjectName,
     createNewProject,
     hostName,
     guestName,
     updateHostName,
     updateGuestName,
+    saveCurrentProject,
+    bubbles
   } = useProjectStore();
 
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
@@ -60,7 +63,13 @@ export const Sidebar: React.FC = () => {
 
   // 初始化加载项目列表
   useEffect(() => {
-    fetchAllProjects();
+    const init = async () => {
+      // 1. 先加载列表
+      await fetchAllProjects();
+      // 2. 再恢复上次打开的项目
+      await restoreSession();
+    };
+    init();
   }, []);
 
   // 路由激活状态判断
@@ -75,9 +84,20 @@ export const Sidebar: React.FC = () => {
   };
 
   // 项目点击处理
-  const handleProjectClick = (filename: string) => {
-    loadProject(filename);
-    navigate("/");
+  const handleProjectClick = async (filename: string) => {
+    const isExistingProject = projectList.some(p => p.name === currentProjectName);
+    const hasContent = bubbles.length > 0 && (bubbles.length > 1 || bubbles[0].content.trim() !== "");
+
+    if (isExistingProject || hasContent) {
+      console.log("Saving changes before switch...");
+      await saveCurrentProject();
+    } else {
+      console.log("Skipping save for empty default project.");
+    }
+
+    // 2. 加载新项目
+    await loadProject(filename);
+    navigate('/');
   };
 
   // 新建项目处理
@@ -185,11 +205,10 @@ export const Sidebar: React.FC = () => {
                   <div
                     key={proj.filename}
                     onClick={() => handleProjectClick(proj.filename)}
-                    className={`px-3 py-1.5 text-sm font-display rounded cursor-pointer transition-colors truncate flex justify-between items-center group/item ${
-                      currentProjectName === proj.name
-                        ? "bg-primary/10 text-primary font-bold"
-                        : "text-text-secondary hover:bg-secondary/10"
-                    }`}
+                    className={`px-3 py-1.5 text-sm font-display rounded cursor-pointer transition-colors truncate flex justify-between items-center group/item ${currentProjectName === proj.name
+                      ? "bg-primary/10 text-primary font-bold"
+                      : "text-text-secondary hover:bg-secondary/10"
+                      }`}
                     title={proj.name}
                   >
                     <span className="truncate">{proj.name}</span>

@@ -18,4 +18,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   showSaveDialog: (defaultName) => ipcRenderer.invoke('show-save-dialog', defaultName),
 
+  saveAppConfig: (config) => ipcRenderer.invoke('save-app-config', config),
+  getAppConfig: () => ipcRenderer.invoke('get-app-config'),
+
 });
