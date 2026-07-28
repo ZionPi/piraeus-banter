@@ -1,0 +1,262 @@
+[
+    {
+        "name": "温柔姐姐",
+        "id": "zh_female_inspirational"
+    },
+    {
+        "name": "华妃",
+        "id": "zh_female_huafei"
+    },
+    {
+        "name": "神厨老佛爷",
+        "id": "zh_female_laofoye"
+    },
+    {
+        "name": "广告男",
+        "id": "zh_male_ad"
+    },
+    {
+        "name": "大幂幂",
+        "id": "zh_female_yangmi"
+    },
+    {
+        "name": "元气少女",
+        "id": "zh_female_yqxiaokui"
+    },
+    {
+        "name": "促销男声",
+        "id": "BV401_streaming"
+    },
+    {
+        "name": "春日部姐姐",
+        "id": "zh_female_jiyejizi"
+    },
+    {
+        "name": "小王也",
+        "id": "zh_male_wangye"
+    },
+    {
+        "name": "东北能哥",
+        "id": "zh_male_liuneng"
+    },
+    {
+        "name": "高端广告男",
+        "id": "zh_male_gaoduanguanggao"
+    },
+    {
+        "name": "综艺萝莉",
+        "id": "zh_female_luolikepu"
+    },
+    {
+        "name": "港配男声",
+        "id": "zh_male_xbgaoxiao"
+    },
+    {
+        "name": "爽朗男声",
+        "id": "zh_male_huolijieshuo"
+    },
+    {
+        "name": "沉稳男声",
+        "id": "zh_male_vopyounan"
+    },
+    {
+        "name": "赛事解说",
+        "id": "BV414_streaming"
+    },
+    {
+        "name": "动漫海绵",
+        "id": "BV063_streaming"
+    },
+    {
+        "name": "美小羊",
+        "id": "zh_female_meiyangyang"
+    },
+    {
+        "name": "电视广告",
+        "id": "BV433_streaming"
+    },
+    {
+        "name": "章鱼哥哥",
+        "id": "zh_male_zhangyuge"
+    },
+    {
+        "name": "女儿国",
+        "id": "zh_female_nverguo"
+    },
+    {
+        "name": "粤语",
+        "id": "BV026_streaming"
+    },
+    {
+        "name": "哪吒",
+        "id": "zh_male_nezha"
+    },
+    {
+        "name": "小青",
+        "id": "zh_female_xiaoqing_clone2"
+    },
+    {
+        "name": "黛玉",
+        "id": "BV425_streaming"
+    },
+    {
+        "name": "女少侠",
+        "id": "BV137_streaming"
+    },
+    {
+        "name": "上海阿姨",
+        "id": "BV217_streaming"
+    },
+    {
+        "name": "武则天",
+        "id": "zh_female_wuzetian"
+    },
+    {
+        "name": "懒小羊",
+        "id": "BV426_streaming"
+    },
+    {
+        "name": "小新",
+        "id": "BV050_streaming"
+    },
+    {
+        "name": "侠客",
+        "id": "zh_male_xiake"
+    },
+    {
+        "name": "台湾女",
+        "id": "BV025_streaming"
+    },
+    {
+        "name": "顾里",
+        "id": "zh_female_guli_stream_gpu"
+    },
+    {
+        "name": "英文女王",
+        "id": "en_female_kat_clone2"
+    },
+    {
+        "name": "幺妹",
+        "id": "BV221_streaming"
+    },
+    {
+        "name": "恐怖电影",
+        "id": "zh_male_gukongbu"
+    },
+    {
+        "name": "文艺女声",
+        "id": "BV428_streaming"
+    },
+    {
+        "name": "单口相声",
+        "id": "zh_male_ziyejunjie"
+    },
+    {
+        "name": "少儿故事",
+        "id": "zh_female_story"
+    },
+    {
+        "name": "广西表哥",
+        "id": "BV213_streaming"
+    },
+    {
+        "name": "费翔",
+        "id": "zh_male_shangyin"
+    },
+    {
+        "name": "容嬷嬷",
+        "id": "BV430_streaming"
+    },
+    {
+        "name": "夹子音",
+        "id": "zh_female_jiazi"
+    },
+    {
+        "name": "心灵鸡汤",
+        "id": "BV403_streaming"
+    },
+    {
+        "name": "TVB",
+        "id": "BV409_streaming"
+    },
+    {
+        "name": "龅牙珍",
+        "id": "zh_female_baoyazhen"
+    },
+    {
+        "name": "电台广播",
+        "id": "zh_female_diantaiguanggao"
+    },
+    {
+        "name": "冯宝宝",
+        "id": "zh_female_fbb"
+    },
+    {
+        "name": "霸总",
+        "id": "zh_male_nanshezhang_bazong_clone2"
+    },
+    {
+        "name": "熊二",
+        "id": "zh_male_xionger_stream_gpu"
+    },
+    {
+        "name": "紫薇",
+        "id": "zh_female_ziwei"
+    },
+    {
+        "name": "四郎",
+        "id": "zh_male_silang_stream_gpu"
+    },
+    {
+        "name": "猴哥",
+        "id": "zh_male_sunwukong_clone2"
+    },
+    {
+        "name": "如来",
+        "id": "zh_male_rulaifo"
+    },
+    {
+        "name": "八戒",
+        "id": "zh_male_zhubajie_clone2"
+    },
+    {
+        "name": "佩奇",
+        "id": "zh_female_peiqi"
+    },
+    {
+        "name": "咆哮男",
+        "id": "BV144_streaming"
+    },
+    {
+        "name": "小帅",
+        "id": "BV411_streaming"
+    },
+    {
+        "name": "佟掌柜",
+        "id": "BV210_streaming"
+    },
+    {
+        "name": "女1",
+        "id": "BV001_streaming"
+    },
+    {
+        "name": "女2",
+        "id": "BV418_streaming"
+    },
+    {
+        "name": "女3",
+        "id": "BV406_streaming"
+    },
+    {
+        "name": "女4",
+        "id": "zh_female_xiaonan_yl_clone2"
+    },
+    {
+        "name": "男1",
+        "id": "zh_male_narration"
+    },
+    {
+        "name": "男2",
+        "id": "BV408_streaming"
+    }
+]

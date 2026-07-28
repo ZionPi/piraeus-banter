@@ -6,7 +6,7 @@ CONDA_ENV := piraeus-banter
 # 默认 Shell
 SHELL := /bin/bash
 
-.PHONY: help install dev run-backend run-frontend clean
+.PHONY: help install dev run-backend run-frontend mobile-deps mobile-analyze mobile-release-apk mobile-clean clean
 
 help: ## 显示此帮助信息
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -30,6 +30,18 @@ run-frontend: ## [开发] 启动 Electron/React 前端
 	@echo "启动 Vite 前端..."
 # 	pnpm dev
 	npm run electron:dev
+
+mobile-deps: ## [Mobile] 安装 Flutter 依赖
+	$(MAKE) -C mobile deps
+
+mobile-analyze: ## [Mobile] 静态检查 Android/Flutter 代码
+	cd mobile && flutter analyze
+
+mobile-release-apk: ## [Mobile] 构建 Android release APK
+	$(MAKE) -C mobile release-apk
+
+mobile-clean: ## [Mobile] 清理 Flutter 构建产物
+	$(MAKE) -C mobile clean
 
 clean: ## [清理]
 	find . -type d -name "__pycache__" -exec rm -rf {} +

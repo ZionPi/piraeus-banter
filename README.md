@@ -44,3 +44,29 @@ Piraeus Banter 是一款现代化的桌面端内容创作工具，旨在将文�
 ## 📄 许可证
 
 MIT License
+
+
+## 📱 Android Mobile
+
+仓库内新增 `mobile/` Flutter Android 版本，结构参考本机 `localshare`。当前支持：
+
+- 多项目本地管理；
+- 主持人/嘉宾气泡编辑；
+- 粘贴或文件导入桌面版 `dialogue_list` JSON；
+- 导入/导出带音频的项目 ZIP 包；
+- Android 端直接调用 ByteDance/Sami WebSocket TTS 生成 MP3；
+- 单条音频播放；
+- 自定义角色名、声音 ID、AppKey/Token；
+- Android launcher 图标已替换。
+
+常用命令：
+
+```bash
+make mobile-deps
+make mobile-analyze
+make mobile-release-apk
+```
+
+APK 产物路径：`mobile/build/app/outputs/flutter-apk/app-release.apk`。
+
+> 当前 release 暂用 debug 签名，方便先安装测试；正式分发前需要接入正式 keystore。
