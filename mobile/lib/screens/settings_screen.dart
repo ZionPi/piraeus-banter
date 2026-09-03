@@ -186,6 +186,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _saveAndClose() {
     final settings = widget.settings;
+    final hostVoiceChanged = settings.hostVoiceId != _hostVoiceId;
+    final guestVoiceChanged = settings.guestVoiceId != _guestVoiceId;
     settings.hostName = _hostName.text.trim().isEmpty
         ? settings.hostName
         : _hostName.text.trim();
@@ -205,7 +207,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     settings.skipBlankOnPlayback = _skipBlankOnPlayback;
     settings.dialogStyleId = _dialogStyleId;
     final project = widget.project;
-    if (project != null) settings.applyNamesTo(project);
+    if (project != null) {
+      settings.applyNamesTo(project);
+      for (final bubble in project.bubbles) {
+        final shouldReset =
+            (hostVoiceChanged && bubble.role == BubbleRole.host) ||
+            (guestVoiceChanged && bubble.role == BubbleRole.guest);
+        if (!shouldReset) continue;
+        bubble.status = BubbleStatus.idle;
+        bubble.audioPath = null;
+        bubble.errorMessage = null;
+      }
+    }
     Navigator.pop(context, true);
   }
 

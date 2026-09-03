@@ -11,7 +11,6 @@ class BubbleCard extends StatefulWidget {
     required this.onGenerate,
     required this.onPlay,
     required this.onPlayFromHere,
-    required this.onDelete,
     this.active = false,
     this.sequence,
   });
@@ -21,7 +20,6 @@ class BubbleCard extends StatefulWidget {
   final VoidCallback onGenerate;
   final VoidCallback onPlay;
   final VoidCallback onPlayFromHere;
-  final VoidCallback onDelete;
   final bool active;
   final int? sequence;
 
@@ -216,11 +214,6 @@ class _BubbleCardState extends State<BubbleCard> {
                             ],
                             onTap: widget.onPlayFromHere,
                           ),
-                          _IconGlassButton(
-                            icon: Icons.delete_outline_rounded,
-                            color: const Color(0xFFFF6B8A),
-                            onTap: widget.onDelete,
-                          ),
                         ],
                       ),
                     ],
@@ -371,35 +364,6 @@ class _ActionChipButton extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _IconGlassButton extends StatelessWidget {
-  const _IconGlassButton({
-    required this.icon,
-    required this.color,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: color.withValues(alpha: .12),
-          border: Border.all(color: color.withValues(alpha: .32)),
-        ),
-        child: Icon(icon, color: color),
       ),
     );
   }

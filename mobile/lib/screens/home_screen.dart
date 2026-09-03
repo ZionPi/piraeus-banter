@@ -386,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen> {
         project: baseProject,
       );
       final project = BanterProject.initial(
-        name: '${style.name}_${input.trim()}',
+        name: '${input.trim()}_${style.name}',
       )..bubbles = bubbles;
       _settings.dialogStyleId = style.id;
       _settings.applyNamesTo(project);
@@ -710,6 +710,27 @@ class _HomeScreenState extends State<HomeScreen> {
     if (result == null) return;
     await _repository.renameProjectFile(_project!, result);
     await _refreshProjects();
+  }
+
+  Future<bool> _confirmDeleteBubble(DialogueBubble bubble, int index) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除这条对话？'),
+        content: Text('确定删除第 ${index + 1} 条「${bubble.name}」吗？相关音频记录也会从项目中移除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    return confirm == true;
   }
 
   Future<void> _selectProject(String fileName) async {
@@ -1137,26 +1158,61 @@ class _HomeScreenState extends State<HomeScreen> {
                           );
                           return KeyedSubtree(
                             key: key,
-                            child: BubbleCard(
-                              bubble: bubble,
-                              sequence: index + 1,
-                              active: bubble.id == _activeBubbleId,
-                              onChanged: (value) {
-                                setState(() {
-                                  bubble.content = value;
-                                  bubble.status = BubbleStatus.idle;
-                                });
-                                _save();
-                              },
-                              onGenerate: () => _generate(bubble),
-                              onPlay: () => _play(bubble),
-                              onPlayFromHere: () =>
-                                  _playAll(startBubbleId: bubble.id),
-                              onDelete: () {
+                            child: Dismissible(
+                              key: ValueKey('dismiss-${bubble.id}'),
+                              direction: DismissDirection.endToStart,
+                              confirmDismiss: (_) =>
+                                  _confirmDeleteBubble(bubble, index),
+                              onDismissed: (_) {
                                 _bubbleKeys.remove(bubble.id);
                                 setState(() => project.bubbles.removeAt(index));
                                 _save();
                               },
+                              background: const SizedBox.shrink(),
+                              secondaryBackground: Container(
+                                margin: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                                padding: const EdgeInsets.only(right: 24),
+                                alignment: Alignment.centerRight,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(30),
+                                  color: const Color(0xFF7F1D1D),
+                                ),
+                                child: const Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: Colors.white,
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      '删除',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              child: BubbleCard(
+                                bubble: bubble,
+                                sequence: index + 1,
+                                active: bubble.id == _activeBubbleId,
+                                onChanged: (value) {
+                                  setState(() {
+                                    bubble.content = value;
+                                    bubble.status = BubbleStatus.idle;
+                                  });
+                                  _save();
+                                },
+                                onGenerate: () => _generate(bubble),
+                                onPlay: () => _play(bubble),
+                                onPlayFromHere: () =>
+                                    _playAll(startBubbleId: bubble.id),
+                              ),
                             ),
                           );
                         },
