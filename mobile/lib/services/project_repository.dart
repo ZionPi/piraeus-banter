@@ -223,4 +223,44 @@ class ProjectRepository {
     encoder.closeSync();
     return zipPath;
   }
+
+  Future<String> exportMergedAudio(
+    BanterProject project, {
+    bool skipBlank = true,
+  }) async {
+    final exportDir = Directory('${(await appDir).path}/exports');
+    if (!await exportDir.exists()) {
+      await exportDir.create(recursive: true);
+    }
+    final outputPath =
+        '${exportDir.path}/${sanitizeFileName(project.name)}_${DateTime.now().millisecondsSinceEpoch}.mp3';
+    final output = File(outputPath);
+    final sink = output.openWrite();
+    var count = 0;
+    try {
+      for (final bubble in project.bubbles) {
+        final path = bubble.audioPath;
+        if (path == null || path.isEmpty) continue;
+        if (skipBlank && !_hasValidSpeech(bubble.content)) continue;
+        final file = File(path);
+        if (!await file.exists()) continue;
+        sink.add(await file.readAsBytes());
+        count++;
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+
+    if (count == 0 || !await output.exists() || await output.length() == 0) {
+      try {
+        await output.delete();
+      } catch (_) {}
+      throw Exception('没有可导出的音频，请先生成音频。');
+    }
+    return outputPath;
+  }
+
+  bool _hasValidSpeech(String text) =>
+      RegExp(r'[a-zA-Z0-9\u4e00-\u9fa5]').hasMatch(text);
 }

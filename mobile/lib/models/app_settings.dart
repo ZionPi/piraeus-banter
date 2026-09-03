@@ -10,6 +10,8 @@ class AppSettings {
     this.accessToken = '',
     this.geminiApiKey = '',
     this.geminiModel = 'gemini-3.8-flash',
+    this.playbackSpeed = 1.0,
+    this.skipBlankOnPlayback = true,
     this.dialogStyleId = 'spar',
     this.lastDialogueInput = '',
   });
@@ -22,6 +24,8 @@ class AppSettings {
   String accessToken;
   String geminiApiKey;
   String geminiModel;
+  double playbackSpeed;
+  bool skipBlankOnPlayback;
   String dialogStyleId;
   String lastDialogueInput;
 
@@ -45,6 +49,8 @@ class AppSettings {
     accessToken: json['accessToken'] as String? ?? '',
     geminiApiKey: json['geminiApiKey'] as String? ?? '',
     geminiModel: json['geminiModel'] as String? ?? 'gemini-3.8-flash',
+    playbackSpeed: (json['playbackSpeed'] as num?)?.toDouble() ?? 1.0,
+    skipBlankOnPlayback: json['skipBlankOnPlayback'] as bool? ?? true,
     dialogStyleId: json['dialogStyleId'] as String? ?? 'spar',
     lastDialogueInput: json['lastDialogueInput'] as String? ?? '',
   );
@@ -58,6 +64,8 @@ class AppSettings {
     'accessToken': accessToken,
     'geminiApiKey': geminiApiKey,
     'geminiModel': geminiModel,
+    'playbackSpeed': playbackSpeed,
+    'skipBlankOnPlayback': skipBlankOnPlayback,
     'dialogStyleId': dialogStyleId,
     'lastDialogueInput': lastDialogueInput,
   };

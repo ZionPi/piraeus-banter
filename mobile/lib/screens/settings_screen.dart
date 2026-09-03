@@ -28,6 +28,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _token;
   late final TextEditingController _geminiApiKey;
   late String _geminiModel;
+  late double _playbackSpeed;
+  late bool _skipBlankOnPlayback;
   late String _hostVoiceId;
   late String _guestVoiceId;
   late String _dialogStyleId;
@@ -48,6 +50,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _token = TextEditingController(text: settings.accessToken);
     _geminiApiKey = TextEditingController(text: settings.geminiApiKey);
     _geminiModel = settings.geminiModel;
+    _playbackSpeed = settings.playbackSpeed;
+    _skipBlankOnPlayback = settings.skipBlankOnPlayback;
     _dialogStyleId = settings.dialogStyleId;
     _loadVoices();
     _loadStyles();
@@ -197,6 +201,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         GeminiDialogueService.supportedModels.contains(_geminiModel)
         ? _geminiModel
         : GeminiDialogueService.defaultModel;
+    settings.playbackSpeed = _playbackSpeed;
+    settings.skipBlankOnPlayback = _skipBlankOnPlayback;
     settings.dialogStyleId = _dialogStyleId;
     final project = widget.project;
     if (project != null) settings.applyNamesTo(project);
@@ -420,8 +426,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       obscureText: true,
                     ),
                     const SizedBox(height: 12),
+                    _PlaybackSpeedPicker(
+                      value: _playbackSpeed,
+                      onChanged: (value) {
+                        setState(() => _playbackSpeed = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.skip_next_rounded),
+                      title: const Text('跳过空白'),
+                      subtitle: const Text('播放全部时跳过没有可朗读内容或没有音频的条目'),
+                      value: _skipBlankOnPlayback,
+                      onChanged: (value) {
+                        setState(() => _skipBlankOnPlayback = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
                     Text(
-                      '生成音频时会使用当前角色选中的声音 ID 与这里填写的 AppKey。',
+                      '生成音频时会使用当前角色选中的声音 ID 与这里填写的 AppKey；播放速度只影响收听。',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: .56),
                       ),
@@ -537,6 +561,58 @@ class _VoicePickerSheet extends StatefulWidget {
 
   @override
   State<_VoicePickerSheet> createState() => _VoicePickerSheetState();
+}
+
+class _PlaybackSpeedPicker extends StatelessWidget {
+  const _PlaybackSpeedPicker({required this.value, required this.onChanged});
+
+  static const speeds = [0.5, 1.0, 1.25, 1.5, 1.75, 2.0, 4.0];
+
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  String _label(double speed) {
+    if (speed == speed.roundToDouble()) return '${speed.toInt()}x';
+    return '${speed}x';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 10),
+          child: Icon(Icons.speed_rounded),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '播放速度：${_label(value)}',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final speed in speeds)
+                    ChoiceChip(
+                      label: Text(_label(speed)),
+                      selected: (value - speed).abs() < .01,
+                      onSelected: (_) => onChanged(speed),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _VoicePickerSheetState extends State<_VoicePickerSheet> {

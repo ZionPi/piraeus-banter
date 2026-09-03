@@ -41,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _tts = TtsService();
   final _audioPlayer = NativeAudioPlayer();
   final _scrollController = ScrollController();
+  final Map<String, GlobalKey> _bubbleKeys = {};
 
   BanterProject? _project;
   AppSettings _settings = AppSettings();
@@ -50,6 +51,10 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _batchGenerating = false;
   bool _batchStopRequested = false;
   bool _dialogueGenerating = false;
+  bool _playlistPlaying = false;
+  bool _playlistPaused = false;
+  bool _playlistStopRequested = false;
+  String? _activeBubbleId;
 
   @override
   void initState() {
@@ -94,7 +99,11 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _hasValidSpeech(String text) =>
       RegExp(r'[a-zA-Z0-9\u4e00-\u9fa5]').hasMatch(text);
 
-  Future<void> _generate(DialogueBubble bubble) async {
+  Future<bool> _generate(
+    DialogueBubble bubble, {
+    bool showSuccessSnack = true,
+    bool showErrorSnack = true,
+  }) async {
     final project = _project!;
     if (!_hasValidSpeech(bubble.content)) {
       setState(() {
@@ -102,7 +111,8 @@ class _HomeScreenState extends State<HomeScreen> {
         bubble.errorMessage = '没有可朗读内容';
       });
       await _save();
-      return;
+      if (showErrorSnack) _snack('生成失败：没有可朗读内容');
+      return false;
     }
 
     setState(() {
@@ -127,14 +137,16 @@ class _HomeScreenState extends State<HomeScreen> {
         bubble.audioPath = path;
       });
       await _save();
-      _snack('已生成：${bubble.name}');
+      if (showSuccessSnack) _snack('已生成：${bubble.name}');
+      return true;
     } catch (error) {
       setState(() {
         bubble.status = BubbleStatus.error;
         bubble.errorMessage = error.toString();
       });
       await _save();
-      _snack('生成失败：$error');
+      if (showErrorSnack) _snack('生成失败：$error');
+      return false;
     }
   }
 
@@ -152,18 +164,38 @@ class _HomeScreenState extends State<HomeScreen> {
       _batchGenerating = true;
       _batchStopRequested = false;
     });
-    for (final bubble in pending) {
-      if (!mounted || _batchStopRequested) break;
-      await _generate(bubble);
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-    }
-    if (mounted) {
-      final stopped = _batchStopRequested;
-      setState(() {
-        _batchGenerating = false;
-        _batchStopRequested = false;
-      });
-      if (stopped) _snack('已停止。下次会继续生成未完成条目。');
+    var generated = 0;
+    var failed = 0;
+    try {
+      for (final bubble in pending) {
+        if (!mounted || _batchStopRequested) break;
+        final ok = await _generate(
+          bubble,
+          showSuccessSnack: false,
+          showErrorSnack: false,
+        );
+        if (ok) {
+          generated++;
+        } else {
+          failed++;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+    } finally {
+      if (mounted) {
+        final stopped = _batchStopRequested;
+        setState(() {
+          _batchGenerating = false;
+          _batchStopRequested = false;
+        });
+        if (stopped) {
+          _snack('已停止。已生成 $generated 条，下次会继续未完成条目。');
+        } else if (failed > 0) {
+          _snack('批量生成完成：成功 $generated 条，失败 $failed 条。');
+        } else {
+          _snack('全部音频已生成。');
+        }
+      }
     }
   }
 
@@ -380,7 +412,111 @@ class _HomeScreenState extends State<HomeScreen> {
       _snack('这条还没有音频，请先生成。');
       return;
     }
-    await _audioPlayer.play(path);
+    setState(() => _activeBubbleId = bubble.id);
+    await _scrollToBubble(bubble.id);
+    await _audioPlayer.play(path, speed: _settings.playbackSpeed);
+  }
+
+  Future<void> _playAll({String? startBubbleId}) async {
+    final project = _project;
+    if (project == null || _playlistPlaying) return;
+    final startIndex = startBubbleId == null
+        ? 0
+        : project.bubbles.indexWhere((bubble) => bubble.id == startBubbleId);
+    final source = startIndex <= 0
+        ? project.bubbles
+        : project.bubbles.skip(startIndex);
+    final ready = source.where((bubble) {
+      if (_settings.skipBlankOnPlayback && !_hasValidSpeech(bubble.content)) {
+        return false;
+      }
+      return bubble.audioPath?.isNotEmpty == true;
+    }).toList();
+    if (ready.isEmpty) {
+      _snack('还没有可播放的音频，请先生成。');
+      return;
+    }
+    setState(() {
+      _playlistPlaying = true;
+      _playlistPaused = false;
+      _playlistStopRequested = false;
+    });
+    try {
+      for (final bubble in ready) {
+        if (!mounted || _playlistStopRequested) break;
+        final path = bubble.audioPath;
+        if (path == null || path.isEmpty) continue;
+        setState(() => _activeBubbleId = bubble.id);
+        await _scrollToBubble(bubble.id);
+        final duration = await _audioPlayer.duration(path);
+        await _audioPlayer.play(path, speed: _settings.playbackSpeed);
+        await _waitForPlayback(duration, speed: _settings.playbackSpeed);
+      }
+    } finally {
+      await _audioPlayer.stop();
+      if (mounted) {
+        final stopped = _playlistStopRequested;
+        setState(() {
+          _playlistPlaying = false;
+          _playlistPaused = false;
+          _playlistStopRequested = false;
+          _activeBubbleId = null;
+        });
+        if (stopped) {
+          _snack('已停止播放。');
+        } else {
+          _snack('已播放完毕。');
+        }
+      }
+    }
+  }
+
+  Future<void> _stopPlayAll() async {
+    if (!_playlistPlaying) return;
+    setState(() {
+      _playlistStopRequested = true;
+      _playlistPaused = false;
+    });
+    await _audioPlayer.stop();
+  }
+
+  Future<void> _pausePlayAll() async {
+    if (!_playlistPlaying || _playlistPaused) return;
+    setState(() => _playlistPaused = true);
+    await _audioPlayer.pause();
+  }
+
+  Future<void> _resumePlayAll() async {
+    if (!_playlistPlaying || !_playlistPaused) return;
+    setState(() => _playlistPaused = false);
+    await _audioPlayer.resume();
+  }
+
+  Future<void> _waitForPlayback(
+    Duration duration, {
+    required double speed,
+  }) async {
+    final safeSpeed = speed.clamp(0.5, 4.0);
+    var remainingMs = duration.inMilliseconds > 0
+        ? (duration.inMilliseconds / safeSpeed).round() + 250
+        : 3000;
+    while (mounted && !_playlistStopRequested && remainingMs > 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      if (!_playlistPaused) remainingMs -= 150;
+    }
+  }
+
+  Future<void> _scrollToBubble(String id) async {
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    if (!mounted) return;
+    final bubbleContext = _bubbleKeys[id]?.currentContext;
+    if (bubbleContext == null || !bubbleContext.mounted) return;
+    await Scrollable.ensureVisible(
+      bubbleContext,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      alignment: .25,
+    );
   }
 
   Future<void> _openSettings() async {
@@ -487,6 +623,21 @@ class _HomeScreenState extends State<HomeScreen> {
       ], text: '泊睿妙语项目包：${project.name}');
     } catch (error) {
       _snack('导出失败：$error');
+    }
+  }
+
+  Future<void> _exportMergedAudioAndShare() async {
+    final project = _project!;
+    try {
+      final audioPath = await _repository.exportMergedAudio(
+        project,
+        skipBlank: _settings.skipBlankOnPlayback,
+      );
+      await Share.shareXFiles([
+        XFile(audioPath),
+      ], text: '泊睿妙语合成音频：${project.name}');
+    } catch (error) {
+      _snack('导出合成音频失败：$error');
     }
   }
 
@@ -791,6 +942,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 _showImportDialog();
               } else if (value == 'file') {
                 _importFromFile();
+              } else if (value == 'export_audio' && project != null) {
+                _exportMergedAudioAndShare();
               } else if (value == 'export' && project != null) {
                 _exportAndShare();
               }
@@ -798,6 +951,11 @@ class _HomeScreenState extends State<HomeScreen> {
             itemBuilder: (context) => [
               const PopupMenuItem(value: 'paste', child: Text('粘贴导入 JSON')),
               const PopupMenuItem(value: 'file', child: Text('从文件/ZIP 导入')),
+              if (project != null)
+                const PopupMenuItem(
+                  value: 'export_audio',
+                  child: Text('导出合成音频'),
+                ),
               if (project != null)
                 const PopupMenuItem(value: 'export', child: Text('导出/分享项目包')),
             ],
@@ -838,7 +996,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                   style: TextStyle(
                                     fontSize: 22,
                                     fontWeight: FontWeight.w900,
-                                    letterSpacing: -.5,
                                   ),
                                 ),
                               ],
@@ -888,19 +1045,46 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ? null
                                   : (_batchGenerating
                                         ? _stopGenerateAll
+                                        : pendingCount == 0
+                                        ? null
                                         : _generateAll),
                               icon: Icons.bolt_rounded,
                               label: _batchGenerating
                                   ? '停止生成'
+                                  : pendingCount == 0
+                                  ? '全部已生成'
                                   : '生成全部 ($pendingCount)',
                               busy: _batchGenerating,
                             ),
                           ),
                           const SizedBox(width: 10),
                           IconButton.filledTonal(
-                            onPressed: () => _audioPlayer.stop(),
-                            icon: const Icon(Icons.stop_rounded),
+                            onPressed: project == null
+                                ? null
+                                : (_playlistPlaying
+                                      ? (_playlistPaused
+                                            ? _resumePlayAll
+                                            : _pausePlayAll)
+                                      : () => _playAll()),
+                            icon: Icon(
+                              _playlistPlaying
+                                  ? (_playlistPaused
+                                        ? Icons.play_arrow_rounded
+                                        : Icons.pause_rounded)
+                                  : Icons.playlist_play_rounded,
+                            ),
+                            tooltip: _playlistPlaying
+                                ? (_playlistPaused ? '继续播放' : '暂停播放')
+                                : '播放全部',
                           ),
+                          if (_playlistPlaying) ...[
+                            const SizedBox(width: 8),
+                            IconButton.filledTonal(
+                              onPressed: _stopPlayAll,
+                              icon: const Icon(Icons.stop_rounded),
+                              tooltip: '停止播放',
+                            ),
+                          ],
                         ],
                       ),
                     ],
@@ -947,22 +1131,33 @@ class _HomeScreenState extends State<HomeScreen> {
                         itemCount: project.bubbles.length,
                         itemBuilder: (context, index) {
                           final bubble = project.bubbles[index];
-                          return BubbleCard(
-                            key: ValueKey(bubble.id),
-                            bubble: bubble,
-                            onChanged: (value) {
-                              setState(() {
-                                bubble.content = value;
-                                bubble.status = BubbleStatus.idle;
-                              });
-                              _save();
-                            },
-                            onGenerate: () => _generate(bubble),
-                            onPlay: () => _play(bubble),
-                            onDelete: () {
-                              setState(() => project.bubbles.removeAt(index));
-                              _save();
-                            },
+                          final key = _bubbleKeys.putIfAbsent(
+                            bubble.id,
+                            GlobalKey.new,
+                          );
+                          return KeyedSubtree(
+                            key: key,
+                            child: BubbleCard(
+                              bubble: bubble,
+                              sequence: index + 1,
+                              active: bubble.id == _activeBubbleId,
+                              onChanged: (value) {
+                                setState(() {
+                                  bubble.content = value;
+                                  bubble.status = BubbleStatus.idle;
+                                });
+                                _save();
+                              },
+                              onGenerate: () => _generate(bubble),
+                              onPlay: () => _play(bubble),
+                              onPlayFromHere: () =>
+                                  _playAll(startBubbleId: bubble.id),
+                              onDelete: () {
+                                _bubbleKeys.remove(bubble.id);
+                                setState(() => project.bubbles.removeAt(index));
+                                _save();
+                              },
+                            ),
                           );
                         },
                       ),
