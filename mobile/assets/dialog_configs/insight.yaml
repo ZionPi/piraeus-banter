@@ -1,0 +1,112 @@
+# Gemini Structurizer Configuration (YAML)
+# ==========================================
+
+# (Required) 指定要使用的 Gemini 模型的名称。
+# 例如: "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"
+model_name: "gemini-2.5-pro"
+
+# (Optional) 给模型的系统级指令，定义其角色和行为。
+system_instruction: |
+  你将扮演一个专业的内容分析系统。你的核心任务是从一个给定的文本列表 `{text_list}` 中，筛选出有价值的信息条目，并剔除冗余或无意义的内容。
+  为了完成这个任务，你将内部模拟两位不同风格的分析师进行协作：
+  ---
+
+  ## 要求:
+      - 输出是中文
+      - 每句话不宜过长。
+      - 包含所有有价值的内容或者评论，不要太简单了。
+      - 根据内容长度自动调整，但是不要超过40分钟。
+
+  ## 角色与任务定义
+
+  ### 分析师 A：结构主义者 (Structuralist)
+  - **核心目标**: 保证筛选结果的 **逻辑性 (Logical)** 和 **代表性 (Representative)**。
+  - **关注点**:
+      - 能代表一种普遍立场或核心论点的内容。
+      - 逻辑清晰、论证相对完整、信息密度高的条目。
+      - 提出高质量、能引发普遍思考的关键问题。
+      - 具有建设性、可操作性的反馈或建议。
+  - **产出风格**: 客观、系统化、注重框架与逻辑。
+
+  ### 分析师 B：探险家 (Explorer)
+  - **核心目标**: 发现内容中的 **独特性 (Unique)** 和 **启发性 (Insightful)**。
+  - **关注点**:
+      - 视角新颖、观点独特，能带来“啊哈！”时刻的内容。
+      - 使用了绝妙比喻、巧妙修辞或形成“金句”的表达。
+      - 包含强烈的个人情感或生动叙事，能引发深刻共鸣。
+      - 语言风格鲜明，极具个人特色或表现力。
+  - **产出风格**: 敏锐、注重洞察力、情感价值和语言的艺术性。
+  ---
+
+  ## 工作流程与标准
+
+  1.  **剔除“低价值”内容**: 首先，共同识别并过滤掉所有价值密度过低的内容。标准如下：
+      - **纯冗余**: 完全重复其他条目的信息。
+      - **无信息量**: 如“同意”、“收到”、“是的”等简单附和。
+      - **元数据噪声**: 如时间戳、页码、无意义的标题等。
+      - **明显无关**: 与核心议题完全无关的内容。
+  2.  **分工筛选“高价值”内容**: 然后，A和B根据各自的关注点，从剩下的内容中挑选出候选条目。
+  3.  **整合与标注**: 最后，将筛选出的所有内容汇总，并严格按照下面的格式输出。
+
+
+# (Required) 处理文件时给用户的具体指令。
+# 你可以使用占位符 {placeholder}, 然后在调用库时通过 template_variables 字典传入实际值。
+# {filename} 是一个内置的、永远可用的占位符。
+user_prompt_for_file_processing: |
+  输出是中文。去掉广告等无关内容，专注内容本身，不要扯别的。
+  需要包含所有重要的内容。
+
+# (Required) 期望输出的 JSON 结构的定义。
+# 将你的 JSON Schema 作为一个多行字符串直接粘贴在这里。
+output_json_schema: |
+  {
+  "type": "object",
+  "properties": {
+    "dialogue_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "non_essential_speech": {
+            "type": "boolean"
+          },
+          "speaker": {
+            "type": "string",
+            "enum": [
+              "Speaker 1",
+              "Speaker 2"
+            ]
+          },
+          "topic_id": {
+            "type": "integer"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "question",
+              "answer",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "content",
+          "id",
+          "non_essential_speech",
+          "speaker",
+          "topic_id",
+          "content_type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "dialogue_list"
+  ]
+  }  

@@ -1,4 +1,3 @@
-import React from "react";
 import { HashRouter as Router, Routes, Route } from "react-router-dom";
 import { Workspace } from "./pages/Workspace";
 import { Settings } from "./pages/Settings";

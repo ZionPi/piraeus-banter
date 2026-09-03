@@ -16,6 +16,16 @@ export interface Bubble {
   errorMessage?: string;
 }
 
+interface BatchGenerationState {
+  isRunning: boolean;
+  currentBubbleId: string | null;
+  currentIndex: number;
+  total: number;
+  successCount: number;
+  errorCount: number;
+  lastError?: string;
+}
+
 interface ProjectSummary {
   filename: string;
   name: string;
@@ -35,6 +45,7 @@ interface ProjectState {
 
   isPlaying: boolean;
   currentPlayingId: string | null;
+  generation: BatchGenerationState;
 
   isExportModalOpen: boolean;
   scrollPosition: number;
@@ -56,7 +67,7 @@ interface ProjectState {
   importScript: (jsonString: string, filename?: string) => Promise<void>;
   createNewProject: () => Promise<void>;
   saveCurrentProject: () => Promise<void>;
-  generateAudio: (bubbleId: string) => Promise<void>;
+  generateAudio: (bubbleId: string) => Promise<{ success: boolean; error?: string }>;
   generateAll: () => Promise<void>;
   getExportData: () => { audioFiles: string[]; duration: number };
   renameCurrentProject: (newName: string) => Promise<void>;
@@ -100,6 +111,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   scrollPosition: 0, // 默认为 0 (顶部)
   isPlaying: false,
   currentPlayingId: null,
+  generation: {
+    isRunning: false,
+    currentBubbleId: null,
+    currentIndex: 0,
+    total: 0,
+    successCount: 0,
+    errorCount: 0,
+  },
   isExportModalOpen: false,
 
   setScrollPosition: (pos) => set({ scrollPosition: pos }),
@@ -272,7 +291,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generateAudio: async (bubbleId) => {
     const state = get();
     const bubble = state.bubbles.find((b) => b.id === bubbleId);
-    if (!bubble) return;
+    if (!bubble) return { success: false, error: "Bubble not found" };
 
     // 1. 检查是否是无效内容 (如 "......", "？")
     if (!hasValidSpeech(bubble.content)) {
@@ -287,7 +306,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             : b
         ),
       }));
-      return; // 终止，不请求后端
+      return { success: false, error: "No speech content" };
     }
 
     set((state) => ({
@@ -323,8 +342,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || "API Error");
+        let message = `API Error (${response.status})`;
+        try {
+          const errData = await response.json();
+          message = errData.detail || message;
+        } catch {
+          const text = await response.text();
+          message = text || message;
+        }
+        throw new Error(message);
       }
 
       const data = await response.json();
@@ -342,23 +368,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               : b
           ),
         }));
+        await get().saveCurrentProject();
+        return { success: true };
       }
+      return { success: false, error: "TTS returned an unexpected response" };
     } catch (e: any) {
       console.error(e);
+      const message = e?.message || "Failed to generate audio";
       set((state) => ({
         bubbles: state.bubbles.map((b) =>
           b.id === bubbleId
             ? {
               ...b,
               status: "error",
-              errorMessage: "Failed",
+              errorMessage: message,
             }
             : b
         ),
       }));
+      await get().saveCurrentProject();
+      return { success: false, error: message };
     }
 
-    get().saveCurrentProject();
+    return { success: false, error: "Failed to generate audio" };
   },
 
   // ✅ 优化：批量生成 (防封号策略 + 断点续传)
@@ -371,18 +403,48 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     if (bubblesToGen.length === 0) return;
 
-    console.log(
-      `Starting batch generation for ${bubblesToGen.length} bubbles...`
-    );
+    set({
+      generation: {
+        isRunning: true,
+        currentBubbleId: null,
+        currentIndex: 0,
+        total: bubblesToGen.length,
+        successCount: 0,
+        errorCount: 0,
+      },
+    });
 
-    for (const bubble of bubblesToGen) {
-      // 检查应用是否还在运行，或者是否需要中断 (可选优化)
+    for (const [index, bubble] of bubblesToGen.entries()) {
+      set((state) => ({
+        generation: {
+          ...state.generation,
+          currentBubbleId: bubble.id,
+          currentIndex: index + 1,
+        },
+      }));
 
-      await get().generateAudio(bubble.id);
+      const result = await get().generateAudio(bubble.id);
+      set((state) => ({
+        generation: {
+          ...state.generation,
+          successCount: state.generation.successCount + (result.success ? 1 : 0),
+          errorCount: state.generation.errorCount + (result.success ? 0 : 1),
+          lastError: result.success ? state.generation.lastError : result.error,
+        },
+      }));
 
       // 防封号策略：每条之间休息 500ms
       await sleep(500);
     }
+
+    set((state) => ({
+      generation: {
+        ...state.generation,
+        isRunning: false,
+        currentBubbleId: null,
+      },
+    }));
+    await get().saveCurrentProject();
   },
 
   getExportData: () => {

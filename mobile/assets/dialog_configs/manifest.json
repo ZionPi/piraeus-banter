@@ -1,0 +1,56 @@
+[
+  {
+    "id": "literal",
+    "name": "Literal",
+    "path": "assets/dialog_configs/literal.yaml",
+    "description": "忠实复述与清洗文本，适合文章、列表、笔记。"
+  },
+  {
+    "id": "spar",
+    "name": "Spar",
+    "path": "assets/dialog_configs/spar.yaml",
+    "description": "思辨者与质疑者的技术辩论，适合关键词和概念解释。"
+  },
+  {
+    "id": "duo_take",
+    "name": "Duo Take",
+    "path": "assets/dialog_configs/duo_take.yaml",
+    "description": "双人技术点评秀，适合资讯列表和条目解读。"
+  },
+  {
+    "id": "economist",
+    "name": "Economist",
+    "path": "assets/dialog_configs/economist.yaml",
+    "description": "正式新闻播报，适合长篇杂志和全球政经内容。"
+  },
+  {
+    "id": "insight",
+    "name": "Insight",
+    "path": "assets/dialog_configs/insight.yaml",
+    "description": "结构主义者与探险家筛选高价值信息。"
+  },
+  {
+    "id": "comment",
+    "name": "Comment",
+    "path": "assets/dialog_configs/comment.yaml",
+    "description": "评论筛选和精华观点分析。"
+  },
+  {
+    "id": "algo",
+    "name": "Algorithm",
+    "path": "assets/dialog_configs/algo.yaml",
+    "description": "算法导师和新手共同拆解算法题。"
+  },
+  {
+    "id": "math-digest",
+    "name": "Math Digest",
+    "path": "assets/dialog_configs/math/digest.yaml",
+    "description": "数学大师深度讲解材料、定理和难点。"
+  },
+  {
+    "id": "news-brief",
+    "name": "News Brief",
+    "path": "assets/dialog_configs/news/brief.yaml",
+    "description": "五分钟以内的双人新闻速读。"
+  }
+]

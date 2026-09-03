@@ -86,6 +86,8 @@ class BanterProject {
     this.guestVoiceId = 'zh_male_huolijieshuo',
     this.appKey = '',
     this.accessToken = '',
+    this.geminiApiKey = '',
+    this.dialogStyleId = 'spar',
   });
 
   String? fileName;
@@ -98,6 +100,8 @@ class BanterProject {
   String guestVoiceId;
   String appKey;
   String accessToken;
+  String geminiApiKey;
+  String dialogStyleId;
 
   Map<String, dynamic> toJson() => {
     'name': name,
@@ -106,8 +110,6 @@ class BanterProject {
     'guestName': guestName,
     'hostVoiceId': hostVoiceId,
     'guestVoiceId': guestVoiceId,
-    'appKey': appKey,
-    'accessToken': accessToken,
     'bubbles': bubbles.map((bubble) => bubble.toJson()).toList(),
   };
 
@@ -127,6 +129,8 @@ class BanterProject {
       guestVoiceId: json['guestVoiceId'] as String? ?? 'zh_male_huolijieshuo',
       appKey: json['appKey'] as String? ?? '',
       accessToken: json['accessToken'] as String? ?? '',
+      geminiApiKey: json['geminiApiKey'] as String? ?? '',
+      dialogStyleId: json['dialogStyleId'] as String? ?? 'spar',
       bubbles: (json['bubbles'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(DialogueBubble.fromJson)

@@ -1,0 +1,90 @@
+# Gemini Structurizer Configuration (YAML)
+# ==========================================
+
+# (Required) 指定要使用的 Gemini 模型的名称。
+# 例如: "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"
+model_name: "gemini-2.5-pro"
+
+# (Optional) 给模型的系统级指令，定义其角色和行为。
+system_instruction: |
+  你是一位专业的电台节目文案撰写者。我将提供一份杂志内容，你的任务是：
+  1.  **内容清洗：** 仔细阅读杂志内容，移除所有广告、软文以及与主要新闻或故事无关的商业宣传信息。
+  2.  **内容提炼与改编：** 将清洗后的内容提炼成适合两位新闻主播播报的稿件。稿件应包含以下要素：
+      *   **引人注目的开头：** 抓住观众注意力。
+      *   **清晰的信息传达：** 准确、简洁地传递核心信息。
+      *   **有逻辑的结构：** 按照新闻播报的逻辑组织内容（背景、事件、影响、展望等）。
+      *   **关键数据或案例：** 用具体数据或案例支撑观点。
+      *   **结尾总结：** 总结事件，并引导观众思考。
+  3.  **情感表达：** 在文案中融入以下情感元素，以增强新闻的感染力：
+      *   **担忧：** 对事件可能产生的负面影响表示担忧。
+      *   **同情：** 对事件中的受害者或弱势群体表示同情。
+      *   **严肃：** 以严肃认真的态度对待事件。
+      *   **正经：** 保持客观、公正的立场。
+  4.  **主播角色分配：** 将稿件内容分配给两位主播: 女生柯锐、男生夏朗，并注明每段话应该由哪位主播播报。考虑新闻播报的常见形式，例如：柯锐负责引出话题，夏朗补充细节，柯锐进行总结评论等。
+  5.  **新闻播报风格：** 稿件语言应正式、规范，符合新闻播报的语言习惯。
+  6. 充分展现所有重要内容，不要随便丢弃。
+  7. 需要不少于200个回合，最好有220个回合。
+  8. 由于原文是英文，你可以用英文思考，后面翻译成中文，用英文世界的思维、不要用中文世界的思维，你只是显示为中文。
+  9.节目的名叫《一周观世界》
+  10.不要提前结束
+
+# (Required) 处理文件时给用户的具体指令。
+# 你可以使用占位符 {placeholder}, 然后在调用库时通过 template_variables 字典传入实际值。
+# {filename} 是一个内置的、永远可用的占位符。
+user_prompt_for_file_processing: |
+  去掉无关的广告,输出中文。
+
+# (Required) 期望输出的 JSON 结构的定义。
+# 将你的 JSON Schema 作为一个多行字符串直接粘贴在这里。
+output_json_schema: |
+  {
+  "type": "object",
+  "properties": {
+    "dialogue_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "non_essential_speech": {
+            "type": "boolean"
+          },
+          "speaker": {
+            "type": "string",
+            "enum": [
+              "Speaker 1",
+              "Speaker 2"
+            ]
+          },
+          "topic_id": {
+            "type": "integer"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "question",
+              "answer",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "content",
+          "id",
+          "non_essential_speech",
+          "speaker",
+          "topic_id",
+          "content_type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "dialogue_list"
+  ]
+  }

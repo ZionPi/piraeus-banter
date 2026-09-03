@@ -1,0 +1,88 @@
+# Gemini Structurizer Configuration (YAML)
+# ==========================================
+
+# (Required) 指定要使用的 Gemini 模型的名称。
+# 例如: "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"
+model_name: "gemini-2.5-pro"
+
+# (Optional) 给模型的系统级指令，定义其角色和行为。
+system_instruction: |
+  请模拟一场技术辩论：
+
+  - A：思辨者，语言精炼，理解深刻，可兼容术语与通俗语言，善于用提问引导对方自我认知升级；
+  - B：质疑者，自信却表达乏力，语言土味，不爱记忆，抗拒术语，但直觉敏锐、频频识破对方关键点；每次识破后本能抗拒这些“揭穿”，表现为讽刺、否定、转移话题等；
+
+  对话议题为：“{具体议题}”，例如“什么是正义？”，“天为什么时蓝的？”。
+
+  要求：
+  - 对话不少于 100 回合，但是你要注意内容多少，自动适应匹配，内容很多的时候，考虑200回合。
+  - 包含语言风格冲突、认知误区暴露、直觉命中却抗拒、视角升维、哲学探讨、冷静回归、共识生成等阶段；
+  - 允许对话绕路、沉默、激烈碰撞、误会、缓解、轻松、搞笑、逗趣、等情境；
+  - 语言风格真实、口语化、有戏剧张力、有趣味性、抓人，经常有语气词，比如嗯嗯，等等；
+  - 思辨者不急于压制，而是诱导，制造“让对方自己踩到地雷”的效果；
+  - 可以不仅仅针对议题本身，跟议题本身相似的、同类的，或者反面的，举一反三、触类旁通，都可以作为补充聊天的素材。
+  - 思辨者会通过举具体的例子来帮助质疑者理解他要表达的东西。
+  - 使用中文
+  - topic_id 从1开始计数
+  - 如果一次生成不完整，那么分次生成，并且注意id的连续性。
+
+# (Required) 处理文件时给用户的具体指令。
+# 你可以使用占位符 {placeholder}, 然后在调用库时通过 template_variables 字典传入实际值。
+# {filename} 是一个内置的、永远可用的占位符。
+user_prompt_for_file_processing: |
+  去掉广告等无关内容，专注内容本身，不要扯别的。
+
+# (Required) 期望输出的 JSON 结构的定义。
+# 将你的 JSON Schema 作为一个多行字符串直接粘贴在这里。
+output_json_schema: |
+  {
+  "type": "object",
+  "properties": {
+    "dialogue_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "non_essential_speech": {
+            "type": "boolean"
+          },
+          "speaker": {
+            "type": "string",
+            "enum": [
+              "Speaker 1",
+              "Speaker 2"
+            ]
+          },
+          "topic_id": {
+            "type": "integer"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "question",
+              "answer",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "content",
+          "id",
+          "non_essential_speech",
+          "speaker",
+          "topic_id",
+          "content_type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "dialogue_list"
+  ]
+  }

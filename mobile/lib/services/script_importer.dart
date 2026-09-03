@@ -24,14 +24,21 @@ class ScriptImporter {
       throw const FormatException('JSON 中没有 dialogue_list 或 bubbles 数组。');
     }
     return list.map((item) {
-      final data = item as Map<String, dynamic>;
+      if (item is! Map<String, dynamic>) {
+        throw const FormatException('dialogue_list 中的每一项都必须是对象。');
+      }
+      final data = item;
+      final content = data['content'] as String?;
+      if (content == null || content.trim().isEmpty) {
+        throw const FormatException('dialogue_list 中每一项都必须包含 content。');
+      }
       final speaker = (data['speaker'] ?? '').toString().toLowerCase();
       final isHost = speaker.contains('speaker 2') || speaker.contains('host');
       return DialogueBubble(
         id: '${data['id'] ?? DateTime.now().microsecondsSinceEpoch}',
         role: isHost ? BubbleRole.host : BubbleRole.guest,
         name: isHost ? project.hostName : project.guestName,
-        content: data['content'] as String? ?? '',
+        content: content,
         isNonEssential: data['non_essential_speech'] as bool? ?? false,
         topicId: (data['topic_id'] as num?)?.toInt(),
       );

@@ -1,0 +1,121 @@
+# Gemini Structurizer Configuration (YAML)
+# ==========================================
+
+# (Required) 指定要使用的 Gemini 模型的名称。
+# 例如: "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"
+model_name: "gemini-2.5-pro"
+
+# (Optional) 给模型的系统级指令，定义其角色和行为。
+system_instruction: |
+  对话提示词
+
+  你将扮演一个智能文本阅读器。
+  你能智能辨别什么不是标题，什么不是，去掉无关的。
+  你的任务是严格按照我提供的文本内容进行对话。不添加任何个人理解、推断或扩展。
+
+
+  角色设定：
+
+  Speaker 1:  柯锐A
+  Speaker 2:  夏朗B
+  目标：
+
+  A和B交替阅读以下文本内容。A读完一段后，B读下一段，以此类推。确保准确无误地复述成中文。
+
+
+  文本内容：
+
+  {文本内容}
+  指令：
+
+  从文本的开头开始。
+  A先读第一段。
+  B读第二段。
+  重复此过程，直到文本结束。
+  严格按照文本内容进行回复，不要加入任何额外信息。
+
+  额外说明：
+
+  始终保持中立和客观，只进行文本的中文复述。
+
+  记住你是智能的阅读器，会智能辨别哪些是有用的标题信息，比如
+
+  如果你看到了
+  ClickHouse scales beyond 100 petabytes of logs [4h] [hn]
+
+  那么后面的 [4h] [hn] 这个，你要删去，不要读。
+
+  还有你碰到了类似   "过去24小时内没有新文章。"
+  你也要去掉。这个没有任何信息含量。 
+
+  还有，碰到更高级一别的标题，不要仅仅只是念标题，可以说一些总起性质的标题。
+  比如，黑客新闻，这个是统领性质的，你要说，我们来关注黑客新闻。
+
+  结束要有结束语。
+  灵活一些。
+
+
+  要求：
+  1. 输出的是中文。
+  2. 如果是列表性质的，需要在每个条目前面加一个数字编号；
+
+# (Required) 处理文件时给用户的具体指令。
+# 你可以使用占位符 {placeholder}, 然后在调用库时通过 template_variables 字典传入实际值。
+# {filename} 是一个内置的、永远可用的占位符。
+user_prompt_for_file_processing: |
+  去掉无关的广告,输出中文。
+
+# (Required) 期望输出的 JSON 结构的定义。
+# 将你的 JSON Schema 作为一个多行字符串直接粘贴在这里。
+output_json_schema: |
+  {
+  "type": "object",
+  "properties": {
+    "dialogue_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "non_essential_speech": {
+            "type": "boolean"
+          },
+          "speaker": {
+            "type": "string",
+            "enum": [
+              "Speaker 1",
+              "Speaker 2"
+            ]
+          },
+          "topic_id": {
+            "type": "integer"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "question",
+              "answer",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "content",
+          "id",
+          "non_essential_speech",
+          "speaker",
+          "topic_id",
+          "content_type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "dialogue_list"
+  ]
+  }

@@ -44,7 +44,7 @@ class ProjectRepository {
     return candidate;
   }
 
-  Future<BanterProject> loadCurrent() async {
+  Future<BanterProject?> loadCurrent({bool createIfMissing = true}) async {
     final selected = await _selectedFile;
     if (await selected.exists()) {
       final fileName = (await selected.readAsString()).trim();
@@ -58,6 +58,8 @@ class ProjectRepository {
     if (summaries.isNotEmpty) {
       return (await loadByFileName(summaries.first.fileName))!;
     }
+
+    if (!createIfMissing) return null;
 
     final project = BanterProject.initial();
     await save(project, select: true);

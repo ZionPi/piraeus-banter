@@ -8,13 +8,14 @@ interface ChatBubbleProps {
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({ data }) => {
   // 1. 获取 currentPlayingId
-  const { updateBubbleContent, deleteBubble, generateAudio, currentPlayingId, playSingleBubble } = useProjectStore();
+  const { updateBubbleContent, deleteBubble, generateAudio, currentPlayingId, playSingleBubble, generation } = useProjectStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
 
   const isHost = data.role === 'host';
   // 2. 判断是否正在播放自己
   const isPlayingThis = currentPlayingId === data.id;
+  const isGeneratingThis = generation.currentBubbleId === data.id || data.status === 'loading';
 
   // 自动调整高度
   const adjustHeight = () => {
@@ -31,14 +32,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({ data }) => {
 
   // 3. 核心逻辑：自动滚动跟随
   useEffect(() => {
-    if (isPlayingThis && bubbleRef.current) {
-      // 当轮到我播放时，平滑滚动到屏幕中间
+    if ((isPlayingThis || isGeneratingThis) && bubbleRef.current) {
       bubbleRef.current.scrollIntoView({
         behavior: 'smooth',
         block: 'center',
       });
     }
-  }, [isPlayingThis]);
+  }, [isPlayingThis, isGeneratingThis]);
 
   const handleGenerate = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -59,7 +59,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({ data }) => {
         "flex items-start gap-3 group w-full transition-all duration-300 px-2 py-2 rounded-xl",
         isHost ? "justify-end" : "justify-start",
         // 4. 高亮样式：背景微调 + 边框高亮
-        isPlayingThis && "bg-secondary/10 ring-2 ring-primary ring-offset-4 ring-offset-background-light"
+        isPlayingThis && "bg-secondary/10 ring-2 ring-primary ring-offset-4 ring-offset-background-light",
+        isGeneratingThis && !isPlayingThis && "bg-primary/5 ring-2 ring-primary/60 ring-offset-4 ring-offset-background-light"
       )}
     >
 
@@ -82,7 +83,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({ data }) => {
           )}>
             {data.name} {isPlayingThis && "(Speaking...)"}
           </span>
-          {data.status === 'error' && <span className="size-2 rounded-full bg-red-400" title="Error"></span>}
+          {data.status === 'error' && <span className="size-2 rounded-full bg-red-400" title={data.errorMessage || "Error"}></span>}
           {data.status === 'success' && <span className="size-2 rounded-full bg-primary" title="Ready"></span>}
         </div>
 
@@ -147,8 +148,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({ data }) => {
                 </div>
               )}
               {data.status === 'error' && (
-                <div className="flex items-center gap-2 bg-red-50 border border-red-100 px-2 py-1 rounded-md">
-                  <span className="text-xs text-red-500 font-medium max-w-[100px] truncate">{data.errorMessage || "Error"}</span>
+                <div className="flex items-center gap-2 bg-red-50 border border-red-100 px-2 py-1 rounded-md max-w-full">
+                  <span className="text-xs text-red-500 font-medium max-w-[260px] truncate" title={data.errorMessage || "Error"}>{data.errorMessage || "Error"}</span>
                   <button onClick={handleGenerate} className="size-5 flex items-center justify-center rounded-full hover:bg-red-100 text-red-500 transition-colors">
                     <span className="material-symbols-outlined text-sm">refresh</span>
                   </button>

@@ -4,7 +4,7 @@ import { ChatBubble } from './ChatBubble';
 
 export const ChatArea: React.FC = () => {
   // 1. 从 Store 获取 scrollPosition 和 setScrollPosition
-  const { bubbles, addBubble, generateAll, currentProjectName, scrollPosition, setScrollPosition, saveCurrentProject } = useProjectStore();
+  const { bubbles, addBubble, generateAll, currentProjectName, scrollPosition, setScrollPosition, saveCurrentProject, generation } = useProjectStore();
   const [searchTerm, setSearchTerm] = useState('');
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -60,7 +60,7 @@ export const ChatArea: React.FC = () => {
   const scrollToTop = () => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   const scrollToBottom = () => bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   const handleGenerateAll = async () => {
-    if (pendingCount === 0) return;
+    if (pendingCount === 0 || generation.isRunning) return;
     await generateAll();
   };
 
@@ -98,13 +98,18 @@ export const ChatArea: React.FC = () => {
         </div>
         <button
           onClick={handleGenerateAll}
-          disabled={pendingCount === 0 && generatingCount === 0}
-          className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold shadow-md transition-all ${generatingCount > 0 ? "bg-secondary/20 text-primary cursor-wait" : pendingCount > 0 ? "bg-primary text-white hover:bg-opacity-90 active:scale-95" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          disabled={generation.isRunning || (pendingCount === 0 && generatingCount === 0)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold shadow-md transition-all ${generation.isRunning || generatingCount > 0 ? "bg-secondary/20 text-primary cursor-wait" : pendingCount > 0 ? "bg-primary text-white hover:bg-opacity-90 active:scale-95" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
         >
-          {generatingCount > 0 ? (
+          {generation.isRunning ? (
             <>
               <span className="material-symbols-outlined text-lg animate-spin">sync</span>
-              <span>Generating... ({generatingCount})</span>
+              <span>Generating {generation.currentIndex}/{generation.total}</span>
+            </>
+          ) : generatingCount > 0 ? (
+            <>
+              <span className="material-symbols-outlined text-lg animate-spin">sync</span>
+              <span>Generating...</span>
             </>
           ) : (
             <>
@@ -114,6 +119,26 @@ export const ChatArea: React.FC = () => {
           )}
         </button>
       </div>
+
+      {(generation.isRunning || generation.errorCount > 0) && (
+        <div className="flex-shrink-0 px-8 py-2 bg-white border-b border-secondary/10 text-xs text-text-secondary flex items-center gap-4">
+          {generation.isRunning && (
+            <>
+              <span className="font-semibold text-primary">
+                {generation.successCount} done, {generation.errorCount} failed
+              </span>
+            </>
+          )}
+          {!generation.isRunning && generation.errorCount > 0 && (
+            <span className="text-red-600 font-medium">
+              Last run finished with {generation.errorCount} failed item{generation.errorCount === 1 ? '' : 's'}.
+            </span>
+          )}
+          {generation.lastError && (
+            <span className="truncate">Last error: {generation.lastError}</span>
+          )}
+        </div>
+      )}
 
       {/* 滚动区域 - 绑定 onScroll */}
       <div

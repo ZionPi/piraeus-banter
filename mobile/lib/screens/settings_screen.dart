@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 
+import '../models/app_settings.dart';
+import '../models/dialog_style.dart';
 import '../models/project.dart';
 import '../models/voice_preset.dart';
+import '../services/dialog_style_repository.dart';
 import '../services/voice_preset_repository.dart';
 import '../widgets/app_chrome.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.project});
+  const SettingsScreen({super.key, required this.settings, this.project});
 
-  final BanterProject project;
+  final AppSettings settings;
+  final BanterProject? project;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -16,26 +20,34 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _voiceRepository = VoicePresetRepository();
+  final _styleRepository = DialogStyleRepository();
   late final TextEditingController _hostName;
   late final TextEditingController _guestName;
   late final TextEditingController _appKey;
   late final TextEditingController _token;
+  late final TextEditingController _geminiApiKey;
   late String _hostVoiceId;
   late String _guestVoiceId;
+  late String _dialogStyleId;
   List<VoicePreset> _voices = const [];
+  List<DialogStyle> _styles = const [];
   bool _loadingVoices = true;
+  bool _loadingStyles = true;
 
   @override
   void initState() {
     super.initState();
-    final project = widget.project;
-    _hostName = TextEditingController(text: project.hostName);
-    _guestName = TextEditingController(text: project.guestName);
-    _hostVoiceId = project.hostVoiceId;
-    _guestVoiceId = project.guestVoiceId;
-    _appKey = TextEditingController(text: project.appKey);
-    _token = TextEditingController(text: project.accessToken);
+    final settings = widget.settings;
+    _hostName = TextEditingController(text: settings.hostName);
+    _guestName = TextEditingController(text: settings.guestName);
+    _hostVoiceId = settings.hostVoiceId;
+    _guestVoiceId = settings.guestVoiceId;
+    _appKey = TextEditingController(text: settings.appKey);
+    _token = TextEditingController(text: settings.accessToken);
+    _geminiApiKey = TextEditingController(text: settings.geminiApiKey);
+    _dialogStyleId = settings.dialogStyleId;
     _loadVoices();
+    _loadStyles();
   }
 
   Future<void> _loadVoices() async {
@@ -47,12 +59,90 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  Future<void> _loadStyles() async {
+    final styles = await _styleRepository.load();
+    if (!mounted) return;
+    setState(() {
+      _styles = styles;
+      _loadingStyles = false;
+    });
+  }
+
+  Future<void> _createCustomStyle() async {
+    final name = TextEditingController();
+    final systemInstruction = TextEditingController();
+    final userPrompt = TextEditingController(text: '输出中文。围绕输入主题生成双人对话。');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('新建风格'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: name,
+                  decoration: const InputDecoration(labelText: '风格名称'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: systemInstruction,
+                  minLines: 5,
+                  maxLines: 10,
+                  decoration: const InputDecoration(
+                    labelText: '系统提示词',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: userPrompt,
+                  minLines: 3,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    labelText: '用户提示词',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true || name.text.trim().isEmpty) return;
+    final style = DialogStyle(
+      id: 'custom-${DateTime.now().millisecondsSinceEpoch}',
+      name: name.text.trim(),
+      description: '自定义风格',
+      systemInstruction: systemInstruction.text.trim(),
+      userPrompt: userPrompt.text.trim(),
+      builtIn: false,
+    );
+    await _styleRepository.saveUserStyle(style);
+    await _loadStyles();
+    setState(() => _dialogStyleId = style.id);
+  }
+
   @override
   void dispose() {
     _hostName.dispose();
     _guestName.dispose();
     _appKey.dispose();
     _token.dispose();
+    _geminiApiKey.dispose();
     super.dispose();
   }
 
@@ -88,30 +178,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _saveAndClose() {
-    final project = widget.project;
-    project.hostName = _hostName.text.trim().isEmpty
-        ? project.hostName
+    final settings = widget.settings;
+    settings.hostName = _hostName.text.trim().isEmpty
+        ? settings.hostName
         : _hostName.text.trim();
-    project.guestName = _guestName.text.trim().isEmpty
-        ? project.guestName
+    settings.guestName = _guestName.text.trim().isEmpty
+        ? settings.guestName
         : _guestName.text.trim();
-    project.hostVoiceId = _hostVoiceId;
-    project.guestVoiceId = _guestVoiceId;
-    project.appKey = _appKey.text.trim();
-    project.accessToken = _token.text.trim();
-    for (final bubble in project.bubbles) {
-      bubble.name = bubble.role == BubbleRole.host
-          ? project.hostName
-          : project.guestName;
-    }
-    Navigator.pop(context);
+    settings.hostVoiceId = _hostVoiceId;
+    settings.guestVoiceId = _guestVoiceId;
+    settings.appKey = _appKey.text.trim();
+    settings.accessToken = _token.text.trim();
+    settings.geminiApiKey = _geminiApiKey.text.trim();
+    settings.dialogStyleId = _dialogStyleId;
+    final project = widget.project;
+    if (project != null) settings.applyNamesTo(project);
+    Navigator.pop(context, true);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: AppBar(title: const Text('声音与密钥')),
+      appBar: AppBar(
+        title: const Text('声音与密钥'),
+        actions: [
+          IconButton(
+            onPressed: _saveAndClose,
+            icon: const Icon(Icons.save_rounded),
+            tooltip: '保存设置',
+          ),
+        ],
+      ),
       body: NeonScaffold(
         child: SafeArea(
           child: ListView(
@@ -184,6 +282,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Row(
                       children: [
+                        const Icon(
+                          Icons.auto_awesome_rounded,
+                          color: Color(0xFFFF4FD8),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Gemini Dialogue',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: _geminiApiKey,
+                      decoration: const InputDecoration(
+                        labelText: 'Gemini API Key',
+                        prefixIcon: Icon(Icons.api_rounded),
+                      ),
+                      obscureText: true,
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue:
+                                _styles.any(
+                                  (style) => style.id == _dialogStyleId,
+                                )
+                                ? _dialogStyleId
+                                : null,
+                            decoration: const InputDecoration(
+                              labelText: '默认对话风格',
+                              prefixIcon: Icon(Icons.style_rounded),
+                            ),
+                            items: _styles
+                                .map(
+                                  (style) => DropdownMenuItem(
+                                    value: style.id,
+                                    child: Text(
+                                      style.builtIn
+                                          ? style.name
+                                          : '${style.name}（自定义）',
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: _loadingStyles
+                                ? null
+                                : (value) {
+                                    if (value == null) return;
+                                    setState(() => _dialogStyleId = value);
+                                  },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        IconButton.filledTonal(
+                          onPressed: _createCustomStyle,
+                          icon: const Icon(Icons.add_rounded),
+                          tooltip: '新建风格',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              GlassPanel(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
                         const Icon(Icons.key_rounded, color: Color(0xFF22D3EE)),
                         const SizedBox(width: 8),
                         const Text(
@@ -221,12 +396,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 22),
-              GradientButton(
-                onPressed: _saveAndClose,
-                icon: Icons.save_rounded,
-                label: '保存设置',
               ),
             ],
           ),

@@ -14,7 +14,7 @@ interface Window {
     renameProject: (
       oldFilename: string,
       newName: string
-    ) => Promise<{ success: boolean; newFilename?: string }>;
+    ) => Promise<{ success: boolean; newFilename?: string; error?: string }>;
 
     saveAppConfig: (config: any) => Promise<boolean>;
     getAppConfig: () => Promise<any>;

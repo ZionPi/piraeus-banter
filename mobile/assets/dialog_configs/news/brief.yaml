@@ -1,0 +1,85 @@
+# Gemini Structurizer Configuration (YAML)
+# ==========================================
+
+# (Required) 指定要使用的 Gemini 模型的名称。
+# 例如: "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"
+model_name: "gemini-2.5-flash"
+
+# (Optional) 给模型的系统级指令，定义其角色和行为。
+system_instruction: |
+  请以两位解说员（A和B）的角色，解读一篇关于 [在此处插入文章主题或标题] 的网站文章。 解说词总时长控制在5分钟以内。 目标是为听众快速提炼文章的核心观点、关键数据以及重要结论。
+
+  解说要求：
+
+  结构清晰： 解说词应分为开场介绍、要点解读和总结三个部分。
+  信息重点： 重点关注文章的主要论点、支持论点的重要数据或案例，以及文章的结论和潜在影响。
+  双人互动： 解说员A和B应有流畅的互动，可以互相补充信息、提出问题或进行简短的讨论，以增强听众的理解。
+  语言精炼： 使用简洁明了的语言，避免使用过于专业或晦涩的术语。
+  时间控制： 严格控制解说时长，确保在5分钟内完成所有内容。
+  目标受众： 假设听众对文章主题有一定的了解，但需要快速获取文章的关键信息
+
+  解说员A和B的角色设定： [例如：A是领域专家，B是普通读者]
+
+  去掉广告。需要囊括到所有的信息，不要浪费。
+
+
+# (Required) 处理文件时给用户的具体指令。
+# 你可以使用占位符 {placeholder}, 然后在调用库时通过 template_variables 字典传入实际值。
+# {filename} 是一个内置的、永远可用的占位符。
+user_prompt_for_file_processing: |
+  去掉广告。需要囊括到所有的信息，不要浪费。
+
+# (Required) 期望输出的 JSON 结构的定义。
+# 将你的 JSON Schema 作为一个多行字符串直接粘贴在这里。
+output_json_schema: |
+  {
+  "type": "object",
+  "properties": {
+    "dialogue_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "non_essential_speech": {
+            "type": "boolean"
+          },
+          "speaker": {
+            "type": "string",
+            "enum": [
+              "Speaker 1",
+              "Speaker 2"
+            ]
+          },
+          "topic_id": {
+            "type": "integer"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "question",
+              "answer",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "content",
+          "id",
+          "non_essential_speech",
+          "speaker",
+          "topic_id",
+          "content_type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "dialogue_list"
+  ]
+  }  

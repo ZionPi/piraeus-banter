@@ -8,7 +8,6 @@ class BubbleCard extends StatefulWidget {
     super.key,
     required this.bubble,
     required this.onChanged,
-    required this.onRoleChanged,
     required this.onGenerate,
     required this.onPlay,
     required this.onDelete,
@@ -16,7 +15,6 @@ class BubbleCard extends StatefulWidget {
 
   final DialogueBubble bubble;
   final ValueChanged<String> onChanged;
-  final ValueChanged<BubbleRole> onRoleChanged;
   final VoidCallback onGenerate;
   final VoidCallback onPlay;
   final VoidCallback onDelete;
@@ -137,10 +135,7 @@ class _BubbleCardState extends State<BubbleCard> {
                           ],
                         ),
                       ),
-                      _RolePill(
-                        value: bubble.role,
-                        onChanged: widget.onRoleChanged,
-                      ),
+                      _RoleBadge(role: bubble.role, accent: accent),
                     ],
                   ),
                   const SizedBox(height: 14),
@@ -259,6 +254,33 @@ class _BubbleCardState extends State<BubbleCard> {
   }
 }
 
+class _RoleBadge extends StatelessWidget {
+  const _RoleBadge({required this.role, required this.accent});
+
+  final BubbleRole role;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(99),
+        color: accent.withValues(alpha: .12),
+        border: Border.all(color: accent.withValues(alpha: .36)),
+      ),
+      child: Text(
+        role.displayName,
+        style: TextStyle(
+          color: accent,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+}
+
 class _ActionChipButton extends StatelessWidget {
   const _ActionChipButton({
     required this.label,
@@ -333,45 +355,6 @@ class _IconGlassButton extends StatelessWidget {
           border: Border.all(color: color.withValues(alpha: .32)),
         ),
         child: Icon(icon, color: color),
-      ),
-    );
-  }
-}
-
-class _RolePill extends StatelessWidget {
-  const _RolePill({required this.value, required this.onChanged});
-
-  final BubbleRole value;
-  final ValueChanged<BubbleRole> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<BubbleRole>(
-      color: const Color(0xFF1B1D35),
-      onSelected: onChanged,
-      itemBuilder: (context) => BubbleRole.values
-          .map(
-            (role) => PopupMenuItem(value: role, child: Text(role.displayName)),
-          )
-          .toList(),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(99),
-          color: Colors.white.withValues(alpha: .08),
-          border: Border.all(color: Colors.white.withValues(alpha: .12)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              value.displayName,
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
-            ),
-            const SizedBox(width: 4),
-            const Icon(Icons.expand_more_rounded, size: 16),
-          ],
-        ),
       ),
     );
   }

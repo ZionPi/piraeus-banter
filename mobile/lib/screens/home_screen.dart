@@ -5,8 +5,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../models/app_settings.dart';
+import '../models/dialog_style.dart';
 import '../models/project.dart';
+import '../services/app_settings_repository.dart';
 import '../services/audio_player.dart';
+import '../services/dialog_style_repository.dart';
+import '../services/gemini_dialogue_service.dart';
 import '../services/project_repository.dart';
 import '../services/script_importer.dart';
 import '../services/tts_service.dart';
@@ -23,14 +28,21 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _repository = ProjectRepository();
+  final _settingsRepository = AppSettingsRepository();
+  final _styleRepository = DialogStyleRepository();
+  final _geminiDialogue = GeminiDialogueService();
   final _tts = TtsService();
   final _audioPlayer = NativeAudioPlayer();
   final _scrollController = ScrollController();
 
   BanterProject? _project;
+  AppSettings _settings = AppSettings();
   List<ProjectSummary> _projects = const [];
+  List<DialogStyle> _styles = const [];
   bool _loading = true;
   bool _batchGenerating = false;
+  bool _batchStopRequested = false;
+  bool _dialogueGenerating = false;
 
   @override
   void initState() {
@@ -39,11 +51,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _load() async {
-    final project = await _repository.loadCurrent();
+    final project = await _repository.loadCurrent(createIfMissing: false);
     final projects = await _repository.listProjects();
+    final settings = await _settingsRepository.load(legacyProject: project);
+    final styles = await _styleRepository.load();
     setState(() {
       _project = project;
+      _settings = settings;
       _projects = projects;
+      _styles = styles;
       _loading = false;
     });
   }
@@ -90,14 +106,14 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final path = await _repository.audioPathFor(project.name, bubble.id);
       final voice = bubble.role == BubbleRole.host
-          ? project.hostVoiceId
-          : project.guestVoiceId;
+          ? _settings.hostVoiceId
+          : _settings.guestVoiceId;
       await _tts.saveAudioToFile(
         text: bubble.content,
         speaker: voice,
         outputPath: path,
-        appKey: project.appKey,
-        accessToken: project.accessToken,
+        appKey: _settings.appKey,
+        accessToken: _settings.accessToken,
       );
       setState(() {
         bubble.status = BubbleStatus.success;
@@ -125,13 +141,146 @@ class _HomeScreenState extends State<HomeScreen> {
         )
         .toList();
     if (pending.isEmpty || _batchGenerating) return;
-    setState(() => _batchGenerating = true);
+    setState(() {
+      _batchGenerating = true;
+      _batchStopRequested = false;
+    });
     for (final bubble in pending) {
-      if (!mounted) break;
+      if (!mounted || _batchStopRequested) break;
       await _generate(bubble);
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
-    if (mounted) setState(() => _batchGenerating = false);
+    if (mounted) {
+      final stopped = _batchStopRequested;
+      setState(() {
+        _batchGenerating = false;
+        _batchStopRequested = false;
+      });
+      if (stopped) _snack('已停止。下次会继续生成未完成条目。');
+    }
+  }
+
+  void _stopGenerateAll() {
+    if (!_batchGenerating) return;
+    setState(() => _batchStopRequested = true);
+    _snack('正在停止，当前条目完成后暂停。');
+  }
+
+  Future<void> _showGenerateDialogueDialog() async {
+    if (_styles.isEmpty || _dialogueGenerating) return;
+    final current = _project ?? BanterProject.initial();
+    var selectedStyleId = _settings.dialogStyleId;
+    final controller = TextEditingController();
+    final shouldGenerate = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('AI 生成对话'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue:
+                      _styles.any((style) => style.id == selectedStyleId)
+                      ? selectedStyleId
+                      : _styles.first.id,
+                  decoration: const InputDecoration(
+                    labelText: '对话风格',
+                    prefixIcon: Icon(Icons.style_rounded),
+                  ),
+                  items: _styles
+                      .map(
+                        (style) => DropdownMenuItem(
+                          value: style.id,
+                          child: Text(style.name),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(() => selectedStyleId = value);
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  minLines: 5,
+                  maxLines: 10,
+                  decoration: const InputDecoration(
+                    labelText: '关键词或话题',
+                    hintText: '例如：能量守恒',
+                    alignLabelWithHint: true,
+                    prefixIcon: Icon(Icons.edit_note_rounded),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(context, true),
+              icon: const Icon(Icons.auto_awesome_rounded),
+              label: const Text('生成对话'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (shouldGenerate != true || controller.text.trim().isEmpty) return;
+    await _generateDialogue(
+      input: controller.text.trim(),
+      styleId: selectedStyleId,
+      baseProject: current,
+    );
+  }
+
+  Future<void> _generateDialogue({
+    required String input,
+    required String styleId,
+    required BanterProject baseProject,
+  }) async {
+    final style = _styles.firstWhere(
+      (style) => style.id == styleId,
+      orElse: () => _styles.first,
+    );
+    if (_settings.geminiApiKey.trim().isEmpty) {
+      _snack('请先在设置里填写 Gemini API Key。');
+      return;
+    }
+
+    setState(() => _dialogueGenerating = true);
+    try {
+      final bubbles = await _geminiDialogue.generateDialogue(
+        input: input.trim(),
+        style: style,
+        settings: _settings,
+        project: baseProject,
+      );
+      final project = BanterProject.initial(
+        name: '${style.name}_${input.trim()}',
+      )..bubbles = bubbles;
+      _settings.dialogStyleId = style.id;
+      _settings.applyNamesTo(project);
+      await _settingsRepository.save(_settings);
+      await _repository.save(project, select: true);
+      final projects = await _repository.listProjects();
+      if (!mounted) return;
+      setState(() {
+        _project = project;
+        _projects = projects;
+      });
+      _snack('已生成 ${bubbles.length} 条对话。');
+    } catch (error) {
+      _snack('生成对话失败：$error');
+    } finally {
+      if (mounted) setState(() => _dialogueGenerating = false);
+    }
   }
 
   Future<void> _play(DialogueBubble bubble) async {
@@ -144,10 +293,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openSettings() async {
-    final project = _project!;
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => SettingsScreen(project: project)));
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => SettingsScreen(settings: _settings, project: _project),
+      ),
+    );
+    if (saved != true) return;
+    await _settingsRepository.save(_settings);
     setState(() {});
     await _save();
   }
@@ -162,6 +314,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (path.toLowerCase().endsWith('.zip')) {
       try {
         final project = await _repository.importProjectZip(path);
+        _settings.applyNamesTo(project);
+        await _repository.save(project, select: true);
         final projects = await _repository.listProjects();
         setState(() {
           _project = project;
@@ -213,17 +367,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _importJson(String raw) async {
     try {
-      final imported = ScriptImporter.parseDesktopJson(raw, _project!);
+      final baseProject = _project ?? BanterProject.initial();
+      _settings.applyNamesTo(baseProject);
+      final imported = ScriptImporter.parseDesktopJson(raw, baseProject);
       final project = BanterProject.initial(
         name:
             'Import_${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
       )..bubbles = imported;
-      project.hostName = _project!.hostName;
-      project.guestName = _project!.guestName;
-      project.hostVoiceId = _project!.hostVoiceId;
-      project.guestVoiceId = _project!.guestVoiceId;
-      project.appKey = _project!.appKey;
-      project.accessToken = _project!.accessToken;
+      _settings.applyNamesTo(project);
       await _repository.save(project, select: true);
       final projects = await _repository.listProjects();
       setState(() {
@@ -252,6 +403,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final name = await _askName('新建项目', 'Mobile_Project');
     if (name == null) return;
     final project = BanterProject.initial(name: name);
+    _settings.applyNamesTo(project);
     await _repository.save(project, select: true);
     final projects = await _repository.listProjects();
     setState(() {
@@ -347,11 +499,19 @@ class _HomeScreenState extends State<HomeScreen> {
     if (confirm != true) return;
     await _repository.deleteProject(summary.fileName);
     final currentDeleted = _project?.fileName == summary.fileName;
+    final projects = await _repository.listProjects();
     if (currentDeleted) {
-      final next = await _repository.loadCurrent();
-      setState(() => _project = next);
+      final next = projects.isEmpty
+          ? null
+          : await _repository.loadByFileName(projects.first.fileName);
+      setState(() {
+        _project = next;
+        _projects = projects;
+      });
+    } else {
+      setState(() => _projects = projects);
     }
-    await _refreshProjects();
+    _snack('已删除：${summary.name}');
   }
 
   @override
@@ -359,16 +519,21 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    final project = _project!;
-    final doneCount = project.bubbles
-        .where((b) => b.status == BubbleStatus.success)
-        .length;
-    final pendingCount = project.bubbles
-        .where(
-          (b) =>
-              b.status == BubbleStatus.idle || b.status == BubbleStatus.error,
-        )
-        .length;
+    final project = _project;
+    final doneCount =
+        project?.bubbles
+            .where((b) => b.status == BubbleStatus.success)
+            .length ??
+        0;
+    final pendingCount =
+        project?.bubbles
+            .where(
+              (b) =>
+                  b.status == BubbleStatus.idle ||
+                  b.status == BubbleStatus.error,
+            )
+            .length ??
+        0;
     return Scaffold(
       extendBodyBehindAppBar: true,
       drawer: Drawer(
@@ -431,39 +596,59 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemCount: _projects.length,
                   itemBuilder: (context, index) {
                     final item = _projects[index];
-                    final selected = item.fileName == project.fileName;
-                    return Container(
-                      margin: const EdgeInsets.symmetric(vertical: 5),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(18),
-                        color: selected
-                            ? const Color(0xFF8B5CF6).withValues(alpha: .22)
-                            : Colors.white.withValues(alpha: .04),
-                        border: Border.all(
-                          color: selected
-                              ? const Color(0xFF8B5CF6)
-                              : Colors.white.withValues(alpha: .08),
+                    final selected = item.fileName == project?.fileName;
+                    return Dismissible(
+                      key: ValueKey(item.fileName),
+                      direction: DismissDirection.endToStart,
+                      confirmDismiss: (_) async {
+                        await _deleteProject(item);
+                        return false;
+                      },
+                      background: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 5),
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
+                        alignment: Alignment.centerRight,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          color: const Color(0xFFEF4444).withValues(alpha: .85),
                         ),
+                        child: const Icon(Icons.delete_rounded),
                       ),
-                      child: ListTile(
-                        leading: Icon(
-                          selected
-                              ? Icons.radio_button_checked
-                              : Icons.article_outlined,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 5),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          color: selected
+                              ? const Color(0xFF8B5CF6).withValues(alpha: .22)
+                              : Colors.white.withValues(alpha: .04),
+                          border: Border.all(
+                            color: selected
+                                ? const Color(0xFF8B5CF6)
+                                : Colors.white.withValues(alpha: .08),
+                          ),
                         ),
-                        title: Text(
-                          item.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                        subtitle: Text(
-                          '${item.bubbleCount} 条 · ${item.updatedAt.toLocal().toString().substring(0, 16)}',
-                        ),
-                        onTap: () => _selectProject(item.fileName),
-                        trailing: IconButton(
-                          onPressed: () => _deleteProject(item),
-                          icon: const Icon(Icons.delete_outline),
+                        child: ListTile(
+                          leading: Icon(
+                            selected
+                                ? Icons.radio_button_checked
+                                : Icons.article_outlined,
+                          ),
+                          title: Text(
+                            item.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          subtitle: Text(
+                            '${item.bubbleCount} 条 · ${item.updatedAt.toLocal().toString().substring(0, 16)}',
+                          ),
+                          onTap: () => _selectProject(item.fileName),
+                          trailing: IconButton(
+                            tooltip: '删除项目',
+                            color: const Color(0xFFFCA5A5),
+                            onPressed: () => _deleteProject(item),
+                            icon: const Icon(Icons.delete_outline),
+                          ),
                         ),
                       ),
                     );
@@ -476,17 +661,17 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       appBar: AppBar(
         title: GestureDetector(
-          onTap: _renameProject,
+          onTap: project == null ? null : _renameProject,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                project.name,
+                project?.name ?? '项目库为空',
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
               Text(
-                'Tap to rename',
+                project == null ? '新建或导入一个项目' : 'Tap to rename',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withValues(alpha: .55),
@@ -496,6 +681,17 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         actions: [
+          IconButton(
+            onPressed: _dialogueGenerating ? null : _showGenerateDialogueDialog,
+            icon: _dialogueGenerating
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.auto_awesome_rounded),
+            tooltip: 'AI 生成对话',
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.ios_share_rounded),
             color: const Color(0xFF1B1D35),
@@ -504,14 +700,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 _showImportDialog();
               } else if (value == 'file') {
                 _importFromFile();
-              } else if (value == 'export') {
+              } else if (value == 'export' && project != null) {
                 _exportAndShare();
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'paste', child: Text('粘贴导入 JSON')),
-              PopupMenuItem(value: 'file', child: Text('从文件/ZIP 导入')),
-              PopupMenuItem(value: 'export', child: Text('导出/分享项目包')),
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'paste', child: Text('粘贴导入 JSON')),
+              const PopupMenuItem(value: 'file', child: Text('从文件/ZIP 导入')),
+              if (project != null)
+                const PopupMenuItem(value: 'export', child: Text('导出/分享项目包')),
             ],
           ),
           IconButton(
@@ -568,7 +765,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ).withValues(alpha: .14),
                             ),
                             child: Text(
-                              '$doneCount/${project.bubbles.length}',
+                              '$doneCount/${project?.bubbles.length ?? 0}',
                               style: const TextStyle(
                                 color: Color(0xFF67E8F9),
                                 fontWeight: FontWeight.w900,
@@ -582,7 +779,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderRadius: BorderRadius.circular(99),
                         child: LinearProgressIndicator(
                           minHeight: 8,
-                          value: project.bubbles.isEmpty
+                          value: project == null || project.bubbles.isEmpty
                               ? 0
                               : doneCount / project.bubbles.length,
                           backgroundColor: Colors.white.withValues(alpha: .09),
@@ -596,10 +793,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Expanded(
                             child: GradientButton(
-                              onPressed: _batchGenerating ? null : _generateAll,
+                              onPressed: project == null
+                                  ? null
+                                  : (_batchGenerating
+                                        ? _stopGenerateAll
+                                        : _generateAll),
                               icon: Icons.bolt_rounded,
                               label: _batchGenerating
-                                  ? '批量生成中...'
+                                  ? '停止生成'
                                   : '生成全部 ($pendingCount)',
                               busy: _batchGenerating,
                             ),
@@ -616,72 +817,107 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               Expanded(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(14, 0, 14, 112),
-                  itemCount: project.bubbles.length,
-                  itemBuilder: (context, index) {
-                    final bubble = project.bubbles[index];
-                    return BubbleCard(
-                      key: ValueKey(bubble.id),
-                      bubble: bubble,
-                      onChanged: (value) {
-                        setState(() {
-                          bubble.content = value;
-                          bubble.status = BubbleStatus.idle;
-                        });
-                        _save();
-                      },
-                      onRoleChanged: (role) {
-                        setState(() {
-                          bubble.role = role;
-                          bubble.name = role == BubbleRole.host
-                              ? project.hostName
-                              : project.guestName;
-                          bubble.status = BubbleStatus.idle;
-                        });
-                        _save();
-                      },
-                      onGenerate: () => _generate(bubble),
-                      onPlay: () => _play(bubble),
-                      onDelete: () {
-                        setState(() => project.bubbles.removeAt(index));
-                        _save();
-                      },
-                    );
-                  },
-                ),
+                child: project == null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: GlassPanel(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.library_add_rounded,
+                                  size: 42,
+                                  color: Color(0xFF67E8F9),
+                                ),
+                                const SizedBox(height: 12),
+                                const Text(
+                                  '还没有项目',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                FilledButton.icon(
+                                  onPressed: _newProject,
+                                  icon: const Icon(Icons.add_rounded),
+                                  label: const Text('新建项目'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(14, 0, 14, 112),
+                        itemCount: project.bubbles.length,
+                        itemBuilder: (context, index) {
+                          final bubble = project.bubbles[index];
+                          return BubbleCard(
+                            key: ValueKey(bubble.id),
+                            bubble: bubble,
+                            onChanged: (value) {
+                              setState(() {
+                                bubble.content = value;
+                                bubble.status = BubbleStatus.idle;
+                              });
+                              _save();
+                            },
+                            onGenerate: () => _generate(bubble),
+                            onPlay: () => _play(bubble),
+                            onDelete: () {
+                              setState(() => project.bubbles.removeAt(index));
+                              _save();
+                            },
+                          );
+                        },
+                      ),
               ),
             ],
           ),
         ),
       ),
-      floatingActionButton: Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(30),
-          color: const Color(0xFF101126).withValues(alpha: .92),
-          border: Border.all(color: Colors.white.withValues(alpha: .12)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            FloatingActionButton.small(
-              heroTag: 'guest',
-              backgroundColor: const Color(0xFF22D3EE),
-              onPressed: () => _addBubble(BubbleRole.guest),
-              child: const Icon(Icons.person_add_alt, color: Color(0xFF07111F)),
+      floatingActionButton: project == null
+          ? FloatingActionButton.extended(
+              onPressed: _newProject,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('新建项目'),
+            )
+          : Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(30),
+                color: const Color(0xFF101126).withValues(alpha: .92),
+                border: Border.all(color: Colors.white.withValues(alpha: .12)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FloatingActionButton.small(
+                    heroTag: 'guest',
+                    backgroundColor: const Color(0xFF22D3EE),
+                    onPressed: () => _addBubble(BubbleRole.guest),
+                    child: const Icon(
+                      Icons.person_add_alt,
+                      color: Color(0xFF07111F),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FloatingActionButton.small(
+                    heroTag: 'host',
+                    backgroundColor: const Color(0xFFFF4FD8),
+                    onPressed: () => _addBubble(BubbleRole.host),
+                    child: const Icon(
+                      Icons.record_voice_over,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: 8),
-            FloatingActionButton.small(
-              heroTag: 'host',
-              backgroundColor: const Color(0xFFFF4FD8),
-              onPressed: () => _addBubble(BubbleRole.host),
-              child: const Icon(Icons.record_voice_over, color: Colors.white),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

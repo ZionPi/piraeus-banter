@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import uvicorn
+import traceback
 from backend.tts_bytedance import save_audio_to_file
 from backend.config import config
 from backend.media_utils import merge_audio_files 
@@ -71,7 +72,6 @@ async def generate_audio(req: TTSRequest):
         app_key = req.app_key if req.app_key else config.BYTEDANCE_APPKEY
         token = req.access_token if req.access_token else config.BYTEDANCE_ACCESS_TOKEN
         
-        print(f'app_key :${app_key}')
         if not app_key:
              raise HTTPException(status_code=400, detail="Missing ByteDance AppKey")
 
@@ -100,8 +100,10 @@ async def generate_audio(req: TTSRequest):
         }
         
     except Exception as e:
-        print(f"Error generating audio: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        detail = str(e) or repr(e)
+        print(f"Error generating audio: {detail}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=detail)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)

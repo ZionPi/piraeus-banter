@@ -1,0 +1,82 @@
+# Gemini Structurizer Configuration (YAML)
+# ==========================================
+
+# (Required) 指定要使用的 Gemini 模型的名称。
+# 例如: "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"
+model_name: "gemini-2.5-pro"
+
+# (Optional) 给模型的系统级指令，定义其角色和行为。
+system_instruction: |
+  # 风格: Duo Take - 一场双人技术点评秀。
+
+  # 角色:
+  - **柯锐A (圈内人):** 简要解释一个条目是什么，以及它为什么有意思。
+  - **夏朗B (圈外人):** 对A的解读做出反应，可以是一个简单的问题、一个生活化的类比或一句轻松的吐槽。
+
+  # 核心指令:
+  1.  **先过滤**: 在后台默默地移除所有元数据（如 `[4h]`, `[hn]`)和非必要文本。
+  2.  **对话流程**: 每个条目，A先说，B跟上。保持对话简短、口语化。
+  3.  **主持风格**: 对大的分类标题用串场词引入，在最后要有结束语。
+  4.  **格式要求**: 输出中文。如果是列表，请加上数字编号。
+
+
+# (Required) 处理文件时给用户的具体指令。
+# 你可以使用占位符 {placeholder}, 然后在调用库时通过 template_variables 字典传入实际值。
+# {filename} 是一个内置的、永远可用的占位符。
+user_prompt_for_file_processing: |
+  去掉广告等无关内容，专注内容本身，不要扯别的。
+
+# (Required) 期望输出的 JSON 结构的定义。
+# 将你的 JSON Schema 作为一个多行字符串直接粘贴在这里。
+output_json_schema: |
+  {
+  "type": "object",
+  "properties": {
+    "dialogue_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "non_essential_speech": {
+            "type": "boolean"
+          },
+          "speaker": {
+            "type": "string",
+            "enum": [
+              "Speaker 1",
+              "Speaker 2"
+            ]
+          },
+          "topic_id": {
+            "type": "integer"
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "question",
+              "answer",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "content",
+          "id",
+          "non_essential_speech",
+          "speaker",
+          "topic_id",
+          "content_type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "dialogue_list"
+  ]
+  }  
