@@ -756,9 +756,8 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                project?.name ?? '项目库为空',
-                overflow: TextOverflow.ellipsis,
+              _ScrollingTitle(
+                text: project?.name ?? '项目库为空',
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
               Text(
@@ -1006,6 +1005,100 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _ScrollingTitle extends StatefulWidget {
+  const _ScrollingTitle({required this.text, required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  State<_ScrollingTitle> createState() => _ScrollingTitleState();
+}
+
+class _ScrollingTitleState extends State<_ScrollingTitle>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  String? _configuredText;
+  double? _configuredWidth;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final defaultStyle = DefaultTextStyle.of(context).style;
+    final style = defaultStyle.merge(widget.style);
+    final textDirection = Directionality.of(context);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width * .52;
+        final painter = TextPainter(
+          text: TextSpan(text: widget.text, style: style),
+          maxLines: 1,
+          textDirection: textDirection,
+        )..layout();
+        final textWidth = painter.width;
+        final shouldScroll = textWidth > availableWidth;
+
+        if (!shouldScroll) {
+          if (_controller.isAnimating) _controller.stop();
+          return Text(widget.text, maxLines: 1, style: widget.style);
+        }
+
+        if (_configuredText != widget.text ||
+            _configuredWidth != availableWidth ||
+            !_controller.isAnimating) {
+          _configuredText = widget.text;
+          _configuredWidth = availableWidth;
+          final distance = textWidth + 36;
+          final durationMs = (distance / 28 * 1000).round().clamp(4500, 12000);
+          _controller
+            ..duration = Duration(milliseconds: durationMs)
+            ..repeat();
+        }
+
+        const gap = SizedBox(width: 36);
+        return ClipRect(
+          child: SizedBox(
+            width: availableWidth,
+            height: painter.height,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) {
+                final offset = -_controller.value * (textWidth + 36);
+                return Transform.translate(
+                  offset: Offset(offset, 0),
+                  child: child,
+                );
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(widget.text, maxLines: 1, style: widget.style),
+                  gap,
+                  Text(widget.text, maxLines: 1, style: widget.style),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
