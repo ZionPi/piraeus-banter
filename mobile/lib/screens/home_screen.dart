@@ -26,6 +26,13 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+class _DialogueGenerateRequest {
+  const _DialogueGenerateRequest({required this.input, required this.styleId});
+
+  final String input;
+  final String styleId;
+}
+
 class _HomeScreenState extends State<HomeScreen> {
   final _repository = ProjectRepository();
   final _settingsRepository = AppSettingsRepository();
@@ -170,73 +177,157 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_styles.isEmpty || _dialogueGenerating) return;
     final current = _project ?? BanterProject.initial();
     var selectedStyleId = _settings.dialogStyleId;
-    final controller = TextEditingController();
-    final shouldGenerate = await showDialog<bool>(
+    final controller = TextEditingController(text: _settings.lastDialogueInput);
+    final result = await showModalBottomSheet<_DialogueGenerateRequest>(
       context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('AI 生成对话'),
-          content: SizedBox(
-            width: double.maxFinite,
+        builder: (context, setDialogState) {
+          final selectedStyle = _styles.firstWhere(
+            (style) => style.id == selectedStyleId,
+            orElse: () => _styles.first,
+          );
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              4,
+              16,
+              MediaQuery.of(context).viewInsets.bottom + 16,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                DropdownButtonFormField<String>(
-                  initialValue:
-                      _styles.any((style) => style.id == selectedStyleId)
-                      ? selectedStyleId
-                      : _styles.first.id,
-                  decoration: const InputDecoration(
-                    labelText: '对话风格',
-                    prefixIcon: Icon(Icons.style_rounded),
-                  ),
-                  items: _styles
-                      .map(
-                        (style) => DropdownMenuItem(
-                          value: style.id,
-                          child: Text(style.name),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        '智能生成对话',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
                         ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setDialogState(() => selectedStyleId = value);
-                  },
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
+                InkWell(
+                  borderRadius: BorderRadius.circular(22),
+                  onTap: () async {
+                    final style = await _pickDialogueStyle(selectedStyleId);
+                    if (style == null) return;
+                    setDialogState(() => selectedStyleId = style.id);
+                  },
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: '对话风格',
+                      prefixIcon: Icon(Icons.style_rounded),
+                      suffixIcon: Icon(Icons.expand_more_rounded),
+                    ),
+                    child: Text(
+                      selectedStyle.builtIn
+                          ? selectedStyle.name
+                          : '${selectedStyle.name}（自定义）',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
                 TextField(
                   controller: controller,
-                  minLines: 5,
-                  maxLines: 10,
-                  decoration: const InputDecoration(
+                  autofocus: true,
+                  minLines: 8,
+                  maxLines: 14,
+                  decoration: InputDecoration(
                     labelText: '关键词或话题',
                     hintText: '例如：能量守恒',
                     alignLabelWithHint: true,
-                    prefixIcon: Icon(Icons.edit_note_rounded),
+                    prefixIcon: const Icon(Icons.edit_note_rounded),
+                    suffixIcon: IconButton(
+                      onPressed: controller.clear,
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: '清空',
+                    ),
                   ),
+                ),
+                const SizedBox(height: 14),
+                FilledButton.icon(
+                  onPressed: () {
+                    final input = controller.text.trim();
+                    if (input.isEmpty) return;
+                    Navigator.pop(
+                      context,
+                      _DialogueGenerateRequest(
+                        input: input,
+                        styleId: selectedStyleId,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.auto_awesome_rounded),
+                  label: const Text('生成对话'),
                 ),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(context, true),
-              icon: const Icon(Icons.auto_awesome_rounded),
-              label: const Text('生成对话'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
-    if (shouldGenerate != true || controller.text.trim().isEmpty) return;
+    if (result == null) return;
+    _settings.lastDialogueInput = result.input;
+    await _settingsRepository.save(_settings);
     await _generateDialogue(
-      input: controller.text.trim(),
-      styleId: selectedStyleId,
+      input: result.input,
+      styleId: result.styleId,
       baseProject: current,
+    );
+  }
+
+  Future<DialogStyle?> _pickDialogueStyle(String selectedStyleId) {
+    return showModalBottomSheet<DialogStyle>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          itemCount: _styles.length,
+          separatorBuilder: (_, index) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final style = _styles[index];
+            final selected = style.id == selectedStyleId;
+            return ListTile(
+              selected: selected,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+              selectedTileColor: const Color(0xFF8B5CF6).withValues(alpha: .20),
+              leading: Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_unchecked_rounded,
+              ),
+              title: Text(
+                style.builtIn ? style.name : '${style.name}（自定义）',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: style.description.isEmpty
+                  ? null
+                  : Text(
+                      style.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+              onTap: () => Navigator.pop(context, style),
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -345,7 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
             maxLines: 14,
             decoration: const InputDecoration(
               hintText:
-                  '{"dialogue_list":[{"id":1,"speaker":"Speaker 1","content":"..."}]}',
+                  '{"dialogue_list":[{"id":1,"speaker":"嘉宾","content":"示例内容"}]}',
             ),
           ),
         ),
@@ -372,7 +463,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final imported = ScriptImporter.parseDesktopJson(raw, baseProject);
       final project = BanterProject.initial(
         name:
-            'Import_${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+            '导入_${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
       )..bubbles = imported;
       _settings.applyNamesTo(project);
       await _repository.save(project, select: true);
@@ -400,7 +491,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _newProject() async {
-    final name = await _askName('新建项目', 'Mobile_Project');
+    final name = await _askName('新建项目', '新项目');
     if (name == null) return;
     final project = BanterProject.initial(name: name);
     _settings.applyNamesTo(project);
@@ -671,7 +762,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
               Text(
-                project == null ? '新建或导入一个项目' : 'Tap to rename',
+                project == null ? '新建或导入一个项目' : '点击重命名',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withValues(alpha: .55),
@@ -690,10 +781,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.auto_awesome_rounded),
-            tooltip: 'AI 生成对话',
+            tooltip: '智能生成对话',
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.ios_share_rounded),
+            icon: const Icon(Icons.folder_open_rounded),
+            tooltip: '导入/导出项目',
             color: const Color(0xFF1B1D35),
             onSelected: (value) {
               if (value == 'paste') {
@@ -735,7 +827,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Where Wisdom Plays',
+                                  '灵感对话工作台',
                                   style: TextStyle(
                                     color: Colors.white.withValues(alpha: .58),
                                     fontWeight: FontWeight.w700,
@@ -881,11 +973,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
       floatingActionButton: project == null
-          ? FloatingActionButton.extended(
-              onPressed: _newProject,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('新建项目'),
-            )
+          ? null
           : Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(

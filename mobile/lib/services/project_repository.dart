@@ -29,7 +29,7 @@ class ProjectRepository {
 
   String sanitizeFileName(String name) {
     final safe = name.replaceAll(RegExp(r'[^a-zA-Z0-9_\-\u4e00-\u9fa5]'), '_');
-    return safe.trim().isEmpty ? 'Mobile_Project' : safe;
+    return safe.trim().isEmpty ? '新项目' : safe;
   }
 
   Future<String> uniqueProjectFileName(String projectName) async {

@@ -7,7 +7,8 @@ import '../models/project.dart';
 import 'script_importer.dart';
 
 class GeminiDialogueService {
-  static const model = 'gemini-3.8-flash';
+  static const defaultModel = 'gemini-3.8-flash';
+  static const supportedModels = ['gemini-3.8-flash', 'gemini-3.7-flash'];
 
   Future<List<DialogueBubble>> generateDialogue({
     required String input,
@@ -20,6 +21,9 @@ class GeminiDialogueService {
       throw Exception('缺少 Gemini API Key，请先在设置里填写。');
     }
 
+    final model = supportedModels.contains(settings.geminiModel)
+        ? settings.geminiModel
+        : defaultModel;
     final uri = Uri.https(
       'generativelanguage.googleapis.com',
       '/v1beta/models/$model:generateContent',

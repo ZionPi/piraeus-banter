@@ -33,7 +33,10 @@ class ScriptImporter {
         throw const FormatException('dialogue_list 中每一项都必须包含 content。');
       }
       final speaker = (data['speaker'] ?? '').toString().toLowerCase();
-      final isHost = speaker.contains('speaker 2') || speaker.contains('host');
+      final isHost =
+          speaker.contains('speaker 2') ||
+          speaker.contains('host') ||
+          speaker.contains('主持');
       return DialogueBubble(
         id: '${data['id'] ?? DateTime.now().microsecondsSinceEpoch}',
         role: isHost ? BubbleRole.host : BubbleRole.guest,

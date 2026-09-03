@@ -18,7 +18,7 @@ class PiraeusBanterMobileApp extends StatelessWidget {
     const bg = Color(0xFF090A18);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '泊睿妙语 Mobile',
+      title: '泊睿妙语移动端',
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -42,13 +42,17 @@ class PiraeusBanterMobileApp extends StatelessWidget {
         cardTheme: CardThemeData(
           elevation: 0,
           color: Colors.white.withValues(alpha: 0.08),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
         ),
         snackBarTheme: SnackBarThemeData(
           behavior: SnackBarBehavior.floating,
           backgroundColor: const Color(0xFF1F2140),
           contentTextStyle: const TextStyle(color: Colors.white),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
@@ -72,7 +76,9 @@ class PiraeusBanterMobileApp extends StatelessWidget {
           style: FilledButton.styleFrom(
             foregroundColor: Colors.white,
             backgroundColor: primary,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
             textStyle: const TextStyle(fontWeight: FontWeight.w800),
           ),

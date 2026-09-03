@@ -6,7 +6,7 @@ class VoicePreset {
 
   factory VoicePreset.fromJson(Map<String, dynamic> json) {
     return VoicePreset(
-      name: json['name'] as String? ?? json['id'] as String? ?? 'Unknown',
+      name: json['name'] as String? ?? json['id'] as String? ?? '未知声音',
       id: json['id'] as String? ?? '',
     );
   }

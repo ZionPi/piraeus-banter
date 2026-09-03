@@ -25,7 +25,7 @@ class DialogueBubble {
   String? audioPath;
   String? errorMessage;
 
-  String get speakerLabel => role == BubbleRole.host ? 'Host' : 'Guest';
+  String get speakerLabel => role == BubbleRole.host ? '主持人' : '嘉宾';
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -46,7 +46,7 @@ class DialogueBubble {
         (role) => role.name == json['role'],
         orElse: () => BubbleRole.guest,
       ),
-      name: json['name'] as String? ?? 'Speaker',
+      name: json['name'] as String? ?? '说话人',
       content: json['content'] as String? ?? '',
       isNonEssential: json['isNonEssential'] as bool? ?? false,
       topicId: (json['topicId'] as num?)?.toInt(),
@@ -80,8 +80,8 @@ class BanterProject {
     required this.updatedAt,
     required this.bubbles,
     this.fileName,
-    this.hostName = 'Host (Leo)',
-    this.guestName = 'Guest (Jane)',
+    this.hostName = '主持人（Leo）',
+    this.guestName = '嘉宾（Jane）',
     this.hostVoiceId = 'zh_female_inspirational',
     this.guestVoiceId = 'zh_male_huolijieshuo',
     this.appKey = '',
@@ -119,12 +119,12 @@ class BanterProject {
   }) {
     return BanterProject(
       fileName: fileName,
-      name: json['name'] as String? ?? 'Mobile_Project',
+      name: json['name'] as String? ?? '新项目',
       updatedAt:
           DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
           DateTime.now(),
-      hostName: json['hostName'] as String? ?? 'Host (Leo)',
-      guestName: json['guestName'] as String? ?? 'Guest (Jane)',
+      hostName: json['hostName'] as String? ?? '主持人（Leo）',
+      guestName: json['guestName'] as String? ?? '嘉宾（Jane）',
       hostVoiceId: json['hostVoiceId'] as String? ?? 'zh_female_inspirational',
       guestVoiceId: json['guestVoiceId'] as String? ?? 'zh_male_huolijieshuo',
       appKey: json['appKey'] as String? ?? '',
@@ -139,19 +139,19 @@ class BanterProject {
   }
 
   factory BanterProject.initial({String? name}) => BanterProject(
-    name: name ?? 'Mobile_Project',
+    name: name ?? '新项目',
     updatedAt: DateTime.now(),
     bubbles: [
       DialogueBubble(
         id: '1',
         role: BubbleRole.host,
-        name: 'Host (Leo)',
+        name: '主持人（Leo）',
         content: '在这里开始编写你的播客对话。',
       ),
       DialogueBubble(
         id: '2',
         role: BubbleRole.guest,
-        name: 'Guest (Jane)',
+        name: '嘉宾（Jane）',
         content: '也可以从桌面版兼容的 JSON 剧本导入。',
       ),
     ],

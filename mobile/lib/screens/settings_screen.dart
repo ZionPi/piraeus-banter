@@ -5,6 +5,7 @@ import '../models/dialog_style.dart';
 import '../models/project.dart';
 import '../models/voice_preset.dart';
 import '../services/dialog_style_repository.dart';
+import '../services/gemini_dialogue_service.dart';
 import '../services/voice_preset_repository.dart';
 import '../widgets/app_chrome.dart';
 
@@ -26,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _appKey;
   late final TextEditingController _token;
   late final TextEditingController _geminiApiKey;
+  late String _geminiModel;
   late String _hostVoiceId;
   late String _guestVoiceId;
   late String _dialogStyleId;
@@ -45,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _appKey = TextEditingController(text: settings.appKey);
     _token = TextEditingController(text: settings.accessToken);
     _geminiApiKey = TextEditingController(text: settings.geminiApiKey);
+    _geminiModel = settings.geminiModel;
     _dialogStyleId = settings.dialogStyleId;
     _loadVoices();
     _loadStyles();
@@ -190,6 +193,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     settings.appKey = _appKey.text.trim();
     settings.accessToken = _token.text.trim();
     settings.geminiApiKey = _geminiApiKey.text.trim();
+    settings.geminiModel =
+        GeminiDialogueService.supportedModels.contains(_geminiModel)
+        ? _geminiModel
+        : GeminiDialogueService.defaultModel;
     settings.dialogStyleId = _dialogStyleId;
     final project = widget.project;
     if (project != null) settings.applyNamesTo(project);
@@ -221,7 +228,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Voice Casting',
+                      '角色声音',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: .56),
                         fontWeight: FontWeight.w800,
@@ -288,7 +295,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         const SizedBox(width: 8),
                         const Text(
-                          'Gemini Dialogue',
+                          '对话生成',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
@@ -300,10 +307,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     TextField(
                       controller: _geminiApiKey,
                       decoration: const InputDecoration(
-                        labelText: 'Gemini API Key',
+                        labelText: 'Gemini API 密钥',
                         prefixIcon: Icon(Icons.api_rounded),
                       ),
                       obscureText: true,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue:
+                          GeminiDialogueService.supportedModels.contains(
+                            _geminiModel,
+                          )
+                          ? _geminiModel
+                          : GeminiDialogueService.defaultModel,
+                      decoration: const InputDecoration(
+                        labelText: 'Gemini 模型',
+                        prefixIcon: Icon(Icons.memory_rounded),
+                      ),
+                      items: GeminiDialogueService.supportedModels
+                          .map(
+                            (model) => DropdownMenuItem(
+                              value: model,
+                              child: Text(model),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() => _geminiModel = value);
+                      },
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -362,7 +394,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const Icon(Icons.key_rounded, color: Color(0xFF22D3EE)),
                         const SizedBox(width: 8),
                         const Text(
-                          'Sami TTS Credentials',
+                          '语音生成密钥',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
@@ -374,7 +406,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     TextField(
                       controller: _appKey,
                       decoration: const InputDecoration(
-                        labelText: 'ByteDance AppKey',
+                        labelText: '字节跳动 AppKey',
                         prefixIcon: Icon(Icons.vpn_key_rounded),
                       ),
                     ),
@@ -382,7 +414,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     TextField(
                       controller: _token,
                       decoration: const InputDecoration(
-                        labelText: 'Access Token（保留字段）',
+                        labelText: '访问令牌（保留字段）',
                         prefixIcon: Icon(Icons.lock_outline_rounded),
                       ),
                       obscureText: true,

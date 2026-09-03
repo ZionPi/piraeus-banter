@@ -2,14 +2,16 @@ import 'project.dart';
 
 class AppSettings {
   AppSettings({
-    this.hostName = 'Host (Leo)',
-    this.guestName = 'Guest (Jane)',
+    this.hostName = '主持人（Leo）',
+    this.guestName = '嘉宾（Jane）',
     this.hostVoiceId = 'zh_female_inspirational',
     this.guestVoiceId = 'zh_male_huolijieshuo',
     this.appKey = '',
     this.accessToken = '',
     this.geminiApiKey = '',
+    this.geminiModel = 'gemini-3.8-flash',
     this.dialogStyleId = 'spar',
+    this.lastDialogueInput = '',
   });
 
   String hostName;
@@ -19,7 +21,9 @@ class AppSettings {
   String appKey;
   String accessToken;
   String geminiApiKey;
+  String geminiModel;
   String dialogStyleId;
+  String lastDialogueInput;
 
   factory AppSettings.fromProject(BanterProject project) => AppSettings(
     hostName: project.hostName,
@@ -33,14 +37,16 @@ class AppSettings {
   );
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
-    hostName: json['hostName'] as String? ?? 'Host (Leo)',
-    guestName: json['guestName'] as String? ?? 'Guest (Jane)',
+    hostName: json['hostName'] as String? ?? '主持人（Leo）',
+    guestName: json['guestName'] as String? ?? '嘉宾（Jane）',
     hostVoiceId: json['hostVoiceId'] as String? ?? 'zh_female_inspirational',
     guestVoiceId: json['guestVoiceId'] as String? ?? 'zh_male_huolijieshuo',
     appKey: json['appKey'] as String? ?? '',
     accessToken: json['accessToken'] as String? ?? '',
     geminiApiKey: json['geminiApiKey'] as String? ?? '',
+    geminiModel: json['geminiModel'] as String? ?? 'gemini-3.8-flash',
     dialogStyleId: json['dialogStyleId'] as String? ?? 'spar',
+    lastDialogueInput: json['lastDialogueInput'] as String? ?? '',
   );
 
   Map<String, dynamic> toJson() => {
@@ -51,7 +57,9 @@ class AppSettings {
     'appKey': appKey,
     'accessToken': accessToken,
     'geminiApiKey': geminiApiKey,
+    'geminiModel': geminiModel,
     'dialogStyleId': dialogStyleId,
+    'lastDialogueInput': lastDialogueInput,
   };
 
   void applyNamesTo(BanterProject project) {
