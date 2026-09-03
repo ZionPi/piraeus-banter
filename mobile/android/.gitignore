@@ -12,3 +12,7 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Project-local reproducible signing key for non-store release APK builds.
+!key.properties
+!app/upload-keystore.jks

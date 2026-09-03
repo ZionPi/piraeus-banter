@@ -21,6 +21,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv*/
 .pytest_cache/
 .coverage
 htmlcov/
@@ -52,6 +53,7 @@ backend/database.db
 *.log
 tmp/
 temp/
+.gstack/
 
 
 voice_presets.json

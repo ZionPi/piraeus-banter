@@ -22,4 +22,9 @@ make release-apk
 
 产物：`build/app/outputs/flutter-apk/app-release.apk`
 
-> 当前 release 使用 debug signing，便于先安装测试；正式分发前应替换为正式签名。
+Release APK 使用仓库内的 `android/app/upload-keystore.jks` 签名，配置在
+`android/key.properties`。这是为了保证任意开发机或 CI checkout 后都能构建出
+可安装、签名一致的 APK。
+
+> 当前签名密码是提交到仓库的非生产默认值，仅用于内部测试和直接分发 APK；正式上架
+> Google Play 或其他商店前，应替换为不提交到仓库的生产签名。
