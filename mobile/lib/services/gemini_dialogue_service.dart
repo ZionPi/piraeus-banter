@@ -7,8 +7,13 @@ import '../models/project.dart';
 import 'script_importer.dart';
 
 class GeminiDialogueService {
-  static const defaultModel = 'gemini-3.8-flash';
-  static const supportedModels = ['gemini-3.8-flash', 'gemini-3.7-flash'];
+  static const defaultModel = 'gemini-3.6-flash';
+  static const supportedModels = [
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.7-flash',
+    'gemini-3.8-flash',
+  ];
 
   Future<List<DialogueBubble>> generateDialogue({
     required String input,
