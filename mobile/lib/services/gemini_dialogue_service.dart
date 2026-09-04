@@ -29,11 +29,7 @@ class GeminiDialogueService {
     final model = supportedModels.contains(settings.geminiModel)
         ? settings.geminiModel
         : defaultModel;
-    final uri = Uri.https(
-      'generativelanguage.googleapis.com',
-      '/v1beta/models/$model:generateContent',
-      {'key': apiKey},
-    );
+    final uri = Uri.https('api.zionpi.serv00.net', '/api/gemini/generate');
     final prompt =
         '''
 ${style.userPrompt}
@@ -57,60 +53,61 @@ $input
     try {
       final request = await client.postUrl(uri);
       request.headers.contentType = ContentType.json;
-      request.write(
-        jsonEncode({
-          'systemInstruction': {
+      final payload = {
+        'systemInstruction': {
+          'parts': [
+            {'text': style.systemInstruction},
+          ],
+        },
+        'contents': [
+          {
+            'role': 'user',
             'parts': [
-              {'text': style.systemInstruction},
+              {'text': prompt},
             ],
           },
-          'contents': [
-            {
-              'role': 'user',
-              'parts': [
-                {'text': prompt},
-              ],
-            },
-          ],
-          'generationConfig': {
-            'responseMimeType': 'application/json',
-            'responseSchema': {
-              'type': 'object',
-              'properties': {
-                'dialogue_list': {
-                  'type': 'array',
-                  'items': {
-                    'type': 'object',
-                    'properties': {
-                      'id': {'type': 'integer'},
-                      'speaker': {
-                        'type': 'string',
-                        'enum': ['Speaker 1', 'Speaker 2'],
-                      },
-                      'content': {'type': 'string'},
-                      'non_essential_speech': {'type': 'boolean'},
-                      'topic_id': {'type': 'integer'},
-                      'content_type': {
-                        'type': 'string',
-                        'enum': ['question', 'answer', 'other'],
-                      },
+        ],
+        'generationConfig': {
+          'responseMimeType': 'application/json',
+          'responseSchema': {
+            'type': 'object',
+            'properties': {
+              'dialogue_list': {
+                'type': 'array',
+                'items': {
+                  'type': 'object',
+                  'properties': {
+                    'id': {'type': 'integer'},
+                    'speaker': {
+                      'type': 'string',
+                      'enum': ['Speaker 1', 'Speaker 2'],
                     },
-                    'required': [
-                      'id',
-                      'speaker',
-                      'content',
-                      'non_essential_speech',
-                      'topic_id',
-                      'content_type',
-                    ],
+                    'content': {'type': 'string'},
+                    'non_essential_speech': {'type': 'boolean'},
+                    'topic_id': {'type': 'integer'},
+                    'content_type': {
+                      'type': 'string',
+                      'enum': ['question', 'answer', 'other'],
+                    },
                   },
+                  'required': [
+                    'id',
+                    'speaker',
+                    'content',
+                    'non_essential_speech',
+                    'topic_id',
+                    'content_type',
+                  ],
                 },
               },
-              'required': ['dialogue_list'],
             },
-            'temperature': 0.8,
+            'required': ['dialogue_list'],
           },
-        }),
+          'temperature': 0.8,
+        },
+      };
+      request.write(
+        jsonEncode({'apiKey': apiKey, 'model': model, 'payload': payload}),
       );
 
       final response = await request.close();
