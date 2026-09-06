@@ -2010,7 +2010,7 @@ class _DialogueGeneratingOverlayState extends State<_DialogueGeneratingOverlay>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2200),
+      duration: const Duration(milliseconds: 3600),
     )..repeat();
   }
 
@@ -2093,7 +2093,7 @@ class _DialogueGeneratingPainter extends CustomPainter {
       canvas,
       center,
       48,
-      -phase * math.pi * 2.6 + .7,
+      -phase * math.pi * 4 + .7,
       math.pi * .68,
       const Color(0xFFFF4FD8),
       2.5,
@@ -2102,7 +2102,7 @@ class _DialogueGeneratingPainter extends CustomPainter {
       canvas,
       center,
       55,
-      phase * math.pi * 1.5 + 2.1,
+      phase * math.pi * 6 + 2.1,
       math.pi * .32,
       Colors.white.withValues(alpha: .7),
       1.5,
@@ -2125,7 +2125,7 @@ class _DialogueGeneratingPainter extends CustomPainter {
 
     canvas.save();
     canvas.translate(center.dx, center.dy);
-    canvas.rotate(phase * math.pi / 2);
+    canvas.rotate(phase * math.pi * 2);
     final diamond = Path()
       ..moveTo(0, -15 - pulse * 2)
       ..lineTo(9 + pulse, 0)

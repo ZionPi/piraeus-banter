@@ -258,7 +258,7 @@ $input
     };
     final uri = ApiConfig.uri('/api/gemini/generate');
     late String body;
-    for (var attempt = 0; attempt < 3; attempt++) {
+    for (var attempt = 0; attempt < 2; attempt++) {
       final client = HttpClient()
         ..connectionTimeout = const Duration(seconds: 20);
       try {
@@ -278,15 +278,15 @@ $input
           response.statusCode,
           body,
         );
-        if (!_retryableStatus(response.statusCode) || attempt == 2) throw error;
+        if (!_retryableStatus(response.statusCode) || attempt == 1) throw error;
       } on GeminiApiException {
         rethrow;
       } on SocketException catch (error) {
-        if (attempt == 2) throw Exception('无法连接 Gemini：${error.message}');
+        if (attempt == 1) throw Exception('无法连接 Gemini：${error.message}');
       } on HttpException catch (error) {
-        if (attempt == 2) throw Exception('Gemini 连接中断：${error.message}');
+        if (attempt == 1) throw Exception('Gemini 连接中断：${error.message}');
       } on TimeoutException {
-        if (attempt == 2) throw Exception('Gemini 请求超时，请稍后重试。');
+        if (attempt == 1) throw Exception('Gemini 请求超时，请稍后重试。');
       } finally {
         client.close(force: true);
       }
@@ -313,7 +313,7 @@ $input
   }
 
   bool _retryableStatus(int status) =>
-      status == 408 || status == 429 || status >= 500;
+      status == 408 || status == 502 || status == 504;
 
   String _imageMimeType(String fileName) {
     final lower = fileName.toLowerCase();
