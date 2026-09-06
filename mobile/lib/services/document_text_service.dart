@@ -66,7 +66,7 @@ class DocumentTextService {
     var uploadFinished = false;
     try {
       final request = await client.postUrl(
-        Uri.https('api.zionpi.serv00.net', '/api/convert-to-text'),
+        ApiConfig.uri('/api/convert-to-text'),
       );
       ApiConfig.authorize(request);
       request.headers.contentType = ContentType(
@@ -142,9 +142,7 @@ class DocumentTextService {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 20);
     try {
-      final request = await client.postUrl(
-        Uri.https('api.zionpi.serv00.net', '/api/url-to-text'),
-      );
+      final request = await client.postUrl(ApiConfig.uri('/api/url-to-text'));
       ApiConfig.authorize(request);
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode({'url': uri.toString()}));

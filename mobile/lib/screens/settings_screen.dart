@@ -48,7 +48,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<DialogStyle> _styles = const [];
   bool _loadingVoices = true;
   bool _loadingStyles = true;
-  bool _showGeminiApiKey = false;
 
   @override
   void initState() {
@@ -476,36 +475,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ],
                     ),
                     const SizedBox(height: 14),
-                    TextField(
-                      controller: _geminiApiKey,
-                      autocorrect: false,
-                      enableSuggestions: false,
+                    const TextField(
+                      enabled: false,
                       decoration: InputDecoration(
                         labelText: 'Gemini API 密钥',
-                        prefixIcon: const Icon(Icons.api_rounded),
-                        suffixIcon: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              onPressed: () => setState(
-                                () => _showGeminiApiKey = !_showGeminiApiKey,
-                              ),
-                              icon: Icon(
-                                _showGeminiApiKey
-                                    ? Icons.visibility_off_rounded
-                                    : Icons.visibility_rounded,
-                              ),
-                              tooltip: _showGeminiApiKey ? '隐藏密钥' : '显示密钥',
-                            ),
-                            IconButton(
-                              onPressed: _geminiApiKey.clear,
-                              icon: const Icon(Icons.close_rounded),
-                              tooltip: '清空密钥',
-                            ),
-                          ],
-                        ),
+                        hintText: '由美国服务器安全管理',
+                        prefixIcon: Icon(Icons.cloud_done_rounded),
                       ),
-                      obscureText: !_showGeminiApiKey,
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(

@@ -5,6 +5,7 @@ import 'dart:io';
 import '../models/app_settings.dart';
 import '../models/dialog_style.dart';
 import '../models/project.dart';
+import 'api_config.dart';
 import 'script_importer.dart';
 
 class DialogueGenerationResult {
@@ -33,9 +34,9 @@ class GeminiApiException implements Exception {
     } catch (_) {}
 
     final message = switch ((statusCode, reason)) {
-      (403, 'CONSUMER_SUSPENDED') => 'Gemini API Key 已停用，请更换后重试。',
-      (401, _) => 'Gemini API Key 无效，请检查后重试。',
-      (403, _) => 'Gemini API Key 没有调用权限，请检查项目设置。',
+      (403, 'CONSUMER_SUSPENDED') => '服务器 Gemini 凭据已停用。',
+      (401, _) => '应用的服务器访问令牌无效，请重新安装。',
+      (403, _) => '服务器 Gemini 凭据没有调用权限。',
       (429, _) => 'Gemini 请求过于频繁或额度已用尽，请稍后重试。',
       (503, _) => 'Gemini 模型当前请求量过高，请稍后重试。',
       (500 || 502 || 504, _) => 'Gemini 服务暂时不可用，请稍后重试。',
@@ -66,7 +67,6 @@ class GeminiDialogueService {
     required BanterProject project,
     void Function(double progress)? onProgress,
   }) async {
-    _requireApiKey(settings.geminiApiKey);
     final model = supportedModels.contains(settings.geminiModel)
         ? settings.geminiModel
         : defaultModel;
@@ -75,7 +75,6 @@ class GeminiDialogueService {
     var title = '';
     for (var index = 0; index < chunks.length; index++) {
       final result = await _generateChunk(
-        apiKey: settings.geminiApiKey,
         input: chunks[index],
         chunkIndex: index,
         chunkCount: chunks.length,
@@ -114,7 +113,6 @@ class GeminiDialogueService {
     required AppSettings settings,
     required BanterProject project,
   }) async {
-    final apiKey = _requireApiKey(settings.geminiApiKey);
     final file = File(path);
     if (!await file.exists()) throw Exception('所选图片已不存在，请重新选择。');
     final bytes = await file.readAsBytes();
@@ -133,7 +131,6 @@ class GeminiDialogueService {
       style: style,
     );
     return _requestDialogue(
-      apiKey: apiKey,
       model: model,
       style: style,
       project: project,
@@ -150,7 +147,6 @@ class GeminiDialogueService {
   }
 
   Future<DialogueGenerationResult> _generateChunk({
-    required String apiKey,
     required String input,
     required int chunkIndex,
     required int chunkCount,
@@ -170,7 +166,6 @@ class GeminiDialogueService {
       style: style,
     );
     return _requestDialogue(
-      apiKey: _requireApiKey(apiKey),
       model: model,
       style: style,
       project: project,
@@ -207,7 +202,6 @@ $input
 ''';
 
   Future<DialogueGenerationResult> _requestDialogue({
-    required String apiKey,
     required String model,
     required DialogStyle style,
     required BanterProject project,
@@ -262,10 +256,7 @@ $input
         'temperature': 0.8,
       },
     };
-    final uri = Uri.https(
-      'generativelanguage.googleapis.com',
-      '/v1beta/models/$model:generateContent',
-    );
+    final uri = ApiConfig.uri('/api/gemini/generate');
     late String body;
     for (var attempt = 0; attempt < 3; attempt++) {
       final client = HttpClient()
@@ -273,8 +264,8 @@ $input
       try {
         final request = await client.postUrl(uri);
         request.headers.contentType = ContentType.json;
-        request.headers.set('X-Goog-Api-Key', apiKey);
-        request.write(jsonEncode(payload));
+        ApiConfig.authorize(request);
+        request.write(jsonEncode({'model': model, 'payload': payload}));
         final response = await request.close().timeout(
           const Duration(seconds: 120),
         );
@@ -319,12 +310,6 @@ $input
     }
 
     return parseDialogueJson(text, project);
-  }
-
-  String _requireApiKey(String value) {
-    final apiKey = value.trim();
-    if (apiKey.isEmpty) throw Exception('请先在设置中填写 Gemini API 密钥。');
-    return apiKey;
   }
 
   bool _retryableStatus(int status) =>

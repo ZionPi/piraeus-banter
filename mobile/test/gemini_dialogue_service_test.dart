@@ -56,13 +56,13 @@ void main() {
     expect(error.toString(), 'Gemini 模型当前请求量过高，请稍后重试。');
   });
 
-  test('停用的 Key 不回显原始响应', () {
+  test('停用的服务器凭据不回显原始响应', () {
     final error = GeminiApiException.fromResponse(
       403,
       '''{"error":{"details":[{"reason":"CONSUMER_SUSPENDED"}],"message":"secret-key"}}''',
     );
 
-    expect(error.toString(), 'Gemini API Key 已停用，请更换后重试。');
+    expect(error.toString(), '服务器 Gemini 凭据已停用。');
     expect(error.toString(), isNot(contains('secret-key')));
   });
 }
