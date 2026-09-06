@@ -2,6 +2,8 @@ APP_ID := com.lix.piraeusbanter.mobile
 FLUTTER ?= flutter
 ADB ?= adb
 DEVICE ?=
+-include ../.env.local
+API_TOKEN_DEFINE := $(if $(PIRAEUS_API_TOKEN),--dart-define=PIRAEUS_API_TOKEN=$(PIRAEUS_API_TOKEN),)
 SELECTED_DEVICE := $(shell $(ADB) devices | awk '\
 	NR > 1 && $$2 == "device" { \
 		if ($$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+$$/ && ip == "") { ip = $$1 } \
@@ -46,10 +48,11 @@ doctor:
 	$(FLUTTER) doctor -v
 
 apk:
-	$(FLUTTER) build apk --debug
+	$(FLUTTER) build apk --debug $(API_TOKEN_DEFINE)
 
 release-apk:
-	$(FLUTTER) build apk --release
+	@test -n "$(PIRAEUS_API_TOKEN)" || (echo "../.env.local 缺少 PIRAEUS_API_TOKEN" && exit 1)
+	$(FLUTTER) build apk --release $(API_TOKEN_DEFINE)
 
 install: apk
 	@test -n "$(RESOLVED_DEVICE)" || (echo "未找到可安装的 Android 设备" && exit 1)
@@ -71,7 +74,7 @@ install-release-apk:
 
 run:
 	@test -n "$(RESOLVED_DEVICE)" || (echo "未找到可运行的 Android 设备" && exit 1)
-	$(FLUTTER) run -d $(RESOLVED_DEVICE)
+	$(FLUTTER) run -d $(RESOLVED_DEVICE) $(API_TOKEN_DEFINE)
 
 restart:
 	@test -n "$(RESOLVED_DEVICE)" || (echo "未找到可重启的 Android 设备" && exit 1)

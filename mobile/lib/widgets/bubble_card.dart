@@ -1,27 +1,43 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
+import '../models/conversation_view_mode.dart';
 import '../models/project.dart';
 import 'app_chrome.dart';
+import 'role_avatar.dart';
 
 class BubbleCard extends StatefulWidget {
   const BubbleCard({
     super.key,
     required this.bubble,
     required this.onChanged,
+    required this.onEditingFinished,
     required this.onGenerate,
     required this.onPlay,
     required this.onPlayFromHere,
+    this.viewMode = ConversationViewMode.chat,
     this.active = false,
     this.sequence,
+    this.hostAvatarSeed = 1,
+    this.guestAvatarSeed = 2,
+    this.hostAvatarPath = '',
+    this.guestAvatarPath = '',
   });
 
   final DialogueBubble bubble;
   final ValueChanged<String> onChanged;
+  final VoidCallback onEditingFinished;
   final VoidCallback onGenerate;
   final VoidCallback onPlay;
   final VoidCallback onPlayFromHere;
+  final ConversationViewMode viewMode;
   final bool active;
   final int? sequence;
+  final int hostAvatarSeed;
+  final int guestAvatarSeed;
+  final String hostAvatarPath;
+  final String guestAvatarPath;
 
   @override
   State<BubbleCard> createState() => _BubbleCardState();
@@ -39,8 +55,13 @@ class _BubbleCardState extends State<BubbleCard> {
   @override
   void didUpdateWidget(covariant BubbleCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.bubble.id != widget.bubble.id) {
-      _controller.text = widget.bubble.content;
+    if (_controller.text != widget.bubble.content) {
+      _controller.value = TextEditingValue(
+        text: widget.bubble.content,
+        selection: TextSelection.collapsed(
+          offset: widget.bubble.content.length,
+        ),
+      );
     }
   }
 
@@ -52,6 +73,160 @@ class _BubbleCardState extends State<BubbleCard> {
 
   @override
   Widget build(BuildContext context) {
+    return switch (widget.viewMode) {
+      ConversationViewMode.chat => _buildChatView(context),
+      ConversationViewMode.card => _buildCardView(context),
+    };
+  }
+
+  Widget _buildChatView(BuildContext context) {
+    final bubble = widget.bubble;
+    final isHost = bubble.role == BubbleRole.host;
+    final accent = isHost ? const Color(0xFFFF4FD8) : const Color(0xFF22D3EE);
+    final bubbleMaxWidth = (MediaQuery.sizeOf(context).width * .70)
+        .clamp(210.0, 520.0)
+        .toDouble();
+    final radius = BorderRadius.only(
+      topLeft: Radius.circular(isHost ? 16 : 5),
+      topRight: Radius.circular(isHost ? 5 : 16),
+      bottomLeft: const Radius.circular(16),
+      bottomRight: const Radius.circular(16),
+    );
+    final avatar = RoleAvatar(
+      seed: isHost ? widget.hostAvatarSeed : widget.guestAvatarSeed,
+      imagePath: isHost ? widget.hostAvatarPath : widget.guestAvatarPath,
+      size: 36,
+    );
+    final message = Column(
+      crossAxisAlignment: isHost
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!isHost && widget.sequence != null) ...[
+                _PlaybackSequence(
+                  text: '#${widget.sequence}',
+                  active: widget.active,
+                  color: accent,
+                  style: _sequenceStyle(),
+                ),
+                const SizedBox(width: 6),
+              ],
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: bubbleMaxWidth - 42),
+                child: Text(
+                  bubble.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: .58),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (isHost && widget.sequence != null) ...[
+                const SizedBox(width: 6),
+                _PlaybackSequence(
+                  text: '#${widget.sequence}',
+                  active: widget.active,
+                  color: accent,
+                  style: _sequenceStyle(),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 5),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: bubbleMaxWidth),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              color: isHost ? const Color(0xFF4A2555) : const Color(0xFF17313B),
+              border: Border.all(
+                color: widget.active
+                    ? accent.withValues(alpha: .82)
+                    : Colors.white.withValues(alpha: .08),
+                width: widget.active ? 1.5 : 1,
+              ),
+              boxShadow: widget.active
+                  ? [
+                      BoxShadow(
+                        color: accent.withValues(alpha: .18),
+                        blurRadius: 18,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: TextField(
+              controller: _controller,
+              minLines: 1,
+              maxLines: null,
+              onChanged: widget.onChanged,
+              onTapOutside: (_) {
+                widget.onEditingFinished();
+                FocusScope.of(context).unfocus();
+              },
+              style: const TextStyle(fontSize: 16, height: 1.5),
+              decoration: InputDecoration(
+                hintText: '输入对话内容...',
+                hintStyle: TextStyle(
+                  color: Colors.white.withValues(alpha: .34),
+                ),
+                isDense: true,
+                filled: false,
+                contentPadding: EdgeInsets.zero,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                focusedErrorBorder: InputBorder.none,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        _ChatActions(
+          isHost: isHost,
+          accent: accent,
+          status: bubble.status,
+          errorMessage: bubble.errorMessage,
+          onGenerate: widget.onGenerate,
+          onPlay: widget.onPlay,
+          onPlayFromHere: widget.onPlayFromHere,
+        ),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+      child: Row(
+        mainAxisAlignment: isHost
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: isHost
+            ? [Flexible(child: message), const SizedBox(width: 8), avatar]
+            : [avatar, const SizedBox(width: 8), Flexible(child: message)],
+      ),
+    );
+  }
+
+  TextStyle _sequenceStyle() => TextStyle(
+    color: Colors.white.withValues(alpha: .32),
+    fontSize: 10,
+    fontWeight: FontWeight.w700,
+  );
+
+  Widget _buildCardView(BuildContext context) {
     final bubble = widget.bubble;
     final isHost = bubble.role == BubbleRole.host;
     final accent = isHost ? const Color(0xFFFF4FD8) : const Color(0xFF22D3EE);
@@ -105,8 +280,10 @@ class _BubbleCardState extends State<BubbleCard> {
                       right: -4,
                       bottom: -20,
                       child: IgnorePointer(
-                        child: Text(
-                          '${widget.sequence}',
+                        child: _PlaybackSequence(
+                          text: '${widget.sequence}',
+                          active: widget.active,
+                          color: accent,
                           style: TextStyle(
                             color: accent.withValues(
                               alpha: widget.active ? .14 : .08,
@@ -122,23 +299,14 @@ class _BubbleCardState extends State<BubbleCard> {
                     children: [
                       Row(
                         children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: LinearGradient(colors: gradient),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: accent.withValues(alpha: .35),
-                                  blurRadius: 22,
-                                ),
-                              ],
-                            ),
-                            child: Icon(
-                              isHost ? Icons.mic_rounded : Icons.person_rounded,
-                              color: Colors.white,
-                            ),
+                          RoleAvatar(
+                            seed: isHost
+                                ? widget.hostAvatarSeed
+                                : widget.guestAvatarSeed,
+                            imagePath: isHost
+                                ? widget.hostAvatarPath
+                                : widget.guestAvatarPath,
+                            size: 42,
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -172,6 +340,10 @@ class _BubbleCardState extends State<BubbleCard> {
                         minLines: 2,
                         maxLines: 8,
                         onChanged: widget.onChanged,
+                        onTapOutside: (_) {
+                          widget.onEditingFinished();
+                          FocusScope.of(context).unfocus();
+                        },
                         style: const TextStyle(fontSize: 16, height: 1.45),
                         decoration: InputDecoration(
                           hintText: '输入对话内容...',
@@ -185,36 +357,11 @@ class _BubbleCardState extends State<BubbleCard> {
                       ),
                       const SizedBox(height: 12),
                       ?status,
-                      Wrap(
-                        spacing: 9,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          _ActionChipButton(
-                            label: '生成',
-                            icon: Icons.auto_awesome_rounded,
-                            colors: gradient,
-                            onTap: widget.onGenerate,
-                          ),
-                          _ActionChipButton(
-                            label: '试听',
-                            icon: Icons.play_arrow_rounded,
-                            colors: const [
-                              Color(0xFF22C55E),
-                              Color(0xFF14B8A6),
-                            ],
-                            onTap: widget.onPlay,
-                          ),
-                          _ActionChipButton(
-                            label: '从此播放',
-                            icon: Icons.playlist_play_rounded,
-                            colors: const [
-                              Color(0xFFF59E0B),
-                              Color(0xFFEF4444),
-                            ],
-                            onTap: widget.onPlayFromHere,
-                          ),
-                        ],
+                      _ActionButtons(
+                        gradient: gradient,
+                        onGenerate: widget.onGenerate,
+                        onPlay: widget.onPlay,
+                        onPlayFromHere: widget.onPlayFromHere,
                       ),
                     ],
                   ),
@@ -292,6 +439,112 @@ class _BubbleCardState extends State<BubbleCard> {
   }
 }
 
+class _PlaybackSequence extends StatefulWidget {
+  const _PlaybackSequence({
+    required this.text,
+    required this.active,
+    required this.color,
+    required this.style,
+  });
+
+  final String text;
+  final bool active;
+  final Color color;
+  final TextStyle style;
+
+  @override
+  State<_PlaybackSequence> createState() => _PlaybackSequenceState();
+}
+
+class _PlaybackSequenceState extends State<_PlaybackSequence>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 720),
+    );
+    if (widget.active) _controller.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PlaybackSequence oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active == widget.active) return;
+    if (widget.active) {
+      _controller.repeat(reverse: true);
+    } else {
+      _controller.stop();
+      _controller.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final pulse = Curves.easeInOut.transform(_controller.value);
+        return Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            if (widget.active)
+              Positioned.fill(
+                left: -7,
+                right: -7,
+                top: -4,
+                bottom: -4,
+                child: Transform.scale(
+                  scale: .92 + pulse * .22,
+                  child: ImageFiltered(
+                    imageFilter: ui.ImageFilter.blur(
+                      sigmaX: 5 + pulse * 7,
+                      sigmaY: 5 + pulse * 7,
+                    ),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: widget.color.withValues(
+                          alpha: .28 + pulse * .30,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            Text(
+              widget.text,
+              style: widget.style.copyWith(
+                color: widget.active
+                    ? widget.color.withValues(alpha: 1)
+                    : widget.style.color,
+                shadows: widget.active
+                    ? [
+                        Shadow(
+                          color: widget.color.withValues(alpha: .75),
+                          blurRadius: 5,
+                        ),
+                      ]
+                    : null,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _RoleBadge extends StatelessWidget {
   const _RoleBadge({required this.role, required this.accent});
 
@@ -315,6 +568,168 @@ class _RoleBadge extends StatelessWidget {
           fontSize: 12,
         ),
       ),
+    );
+  }
+}
+
+class _ChatActions extends StatelessWidget {
+  const _ChatActions({
+    required this.isHost,
+    required this.accent,
+    required this.status,
+    required this.errorMessage,
+    required this.onGenerate,
+    required this.onPlay,
+    required this.onPlayFromHere,
+  });
+
+  final bool isHost;
+  final Color accent;
+  final BubbleStatus status;
+  final String? errorMessage;
+  final VoidCallback onGenerate;
+  final VoidCallback onPlay;
+  final VoidCallback onPlayFromHere;
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = <Widget>[
+      _ChatActionButton(
+        tooltip: status == BubbleStatus.success ? '重新生成音频' : '生成音频',
+        icon: Icons.auto_awesome_rounded,
+        onTap: onGenerate,
+      ),
+      _ChatActionButton(
+        tooltip: '试听这一条',
+        icon: Icons.play_arrow_rounded,
+        onTap: onPlay,
+      ),
+      _ChatActionButton(
+        tooltip: '从这一条开始播放',
+        icon: Icons.playlist_play_rounded,
+        onTap: onPlayFromHere,
+      ),
+    ];
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!isHost) ...[
+          _statusIndicator(),
+          const SizedBox(width: 4),
+          ...actions,
+        ] else ...[
+          ...actions,
+          const SizedBox(width: 4),
+          _statusIndicator(),
+        ],
+      ],
+    );
+  }
+
+  Widget _statusIndicator() {
+    return switch (status) {
+      BubbleStatus.loading => SizedBox(
+        width: 28,
+        height: 28,
+        child: Padding(
+          padding: const EdgeInsets.all(7),
+          child: CircularProgressIndicator(strokeWidth: 2, color: accent),
+        ),
+      ),
+      BubbleStatus.success => const Tooltip(
+        message: '音频已就绪',
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: Icon(
+            Icons.check_circle_rounded,
+            size: 16,
+            color: Color(0xFF22C55E),
+          ),
+        ),
+      ),
+      BubbleStatus.error => Tooltip(
+        message: errorMessage ?? '生成失败',
+        child: const SizedBox(
+          width: 28,
+          height: 28,
+          child: Icon(Icons.error_rounded, size: 17, color: Color(0xFFFF6B8A)),
+        ),
+      ),
+      BubbleStatus.idle => const SizedBox(width: 4, height: 28),
+    };
+  }
+}
+
+class _ChatActionButton extends StatelessWidget {
+  const _ChatActionButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        onPressed: onTap,
+        icon: Icon(icon),
+        iconSize: 19,
+        color: Colors.white.withValues(alpha: .68),
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        padding: EdgeInsets.zero,
+        splashRadius: 18,
+      ),
+    );
+  }
+}
+
+class _ActionButtons extends StatelessWidget {
+  const _ActionButtons({
+    required this.gradient,
+    required this.onGenerate,
+    required this.onPlay,
+    required this.onPlayFromHere,
+  });
+
+  final List<Color> gradient;
+  final VoidCallback onGenerate;
+  final VoidCallback onPlay;
+  final VoidCallback onPlayFromHere;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 9,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        _ActionChipButton(
+          label: '生成',
+          icon: Icons.auto_awesome_rounded,
+          colors: gradient,
+          onTap: onGenerate,
+        ),
+        _ActionChipButton(
+          label: '试听',
+          icon: Icons.play_arrow_rounded,
+          colors: const [Color(0xFF22C55E), Color(0xFF14B8A6)],
+          onTap: onPlay,
+        ),
+        _ActionChipButton(
+          label: '从此播放',
+          icon: Icons.playlist_play_rounded,
+          colors: const [Color(0xFFF59E0B), Color(0xFFEF4444)],
+          onTap: onPlayFromHere,
+        ),
+      ],
     );
   }
 }

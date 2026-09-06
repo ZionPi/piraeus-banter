@@ -9,22 +9,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:piraeus_banter_mobile/main.dart';
+import 'package:piraeus_banter_mobile/screens/home_screen.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
+  testWidgets('应用外壳可以启动', (WidgetTester tester) async {
     await tester.pumpWidget(const PiraeusBanterMobileApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('泊睿妙语 Mobile'), findsOneWidget);
-    expect(find.text('生成全部待处理'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('泊睿妙语 Mobile'), findsNothing);
-    expect(find.text('生成全部待处理'), findsOneWidget);
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(app.title, '泊睿妙语移动端');
+    expect(find.byType(HomeScreen), findsOneWidget);
   });
 }

@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/app_settings.dart';
@@ -11,12 +14,15 @@ import '../models/project.dart';
 import '../services/app_settings_repository.dart';
 import '../services/audio_player.dart';
 import '../services/dialog_style_repository.dart';
+import '../services/document_text_service.dart';
 import '../services/gemini_dialogue_service.dart';
 import '../services/project_repository.dart';
 import '../services/script_importer.dart';
 import '../services/tts_service.dart';
 import '../widgets/app_chrome.dart';
 import '../widgets/bubble_card.dart';
+import 'dialogue_text_screen.dart';
+import 'merged_audio_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -26,17 +32,68 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _DialogueGenerateRequest {
-  const _DialogueGenerateRequest({required this.input, required this.styleId});
+enum _DialogueInputMode { topic, file, url }
 
-  final String input;
+extension on _DialogueInputMode {
+  String get label => switch (this) {
+    _DialogueInputMode.topic => '关键词或话题',
+    _DialogueInputMode.file => '上传文件',
+    _DialogueInputMode.url => '网页链接',
+  };
+
+  String get description => switch (this) {
+    _DialogueInputMode.topic => '输入一个主题，由 AI 主动展开对话',
+    _DialogueInputMode.file => '从 EPUB、PDF、DOCX 等文档生成对话',
+    _DialogueInputMode.url => '支持普通网页和微信公众号文章',
+  };
+
+  IconData get icon => switch (this) {
+    _DialogueInputMode.topic => Icons.chat_bubble_outline_rounded,
+    _DialogueInputMode.file => Icons.upload_file_rounded,
+    _DialogueInputMode.url => Icons.link_rounded,
+  };
+}
+
+class _DialogueGenerateRequest {
+  const _DialogueGenerateRequest.topic({
+    required this.input,
+    required this.styleId,
+  }) : mode = _DialogueInputMode.topic,
+       filePath = null,
+       fileName = null,
+       url = null,
+       additionalText = null;
+
+  const _DialogueGenerateRequest.file({
+    required this.filePath,
+    required this.fileName,
+    required this.additionalText,
+    required this.styleId,
+  }) : mode = _DialogueInputMode.file,
+       input = null,
+       url = null;
+
+  const _DialogueGenerateRequest.url({required this.url, required this.styleId})
+    : mode = _DialogueInputMode.url,
+      input = null,
+      filePath = null,
+      fileName = null,
+      additionalText = null;
+
+  final _DialogueInputMode mode;
+  final String? input;
+  final String? filePath;
+  final String? fileName;
+  final String? url;
+  final String? additionalText;
   final String styleId;
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _repository = ProjectRepository();
   final _settingsRepository = AppSettingsRepository();
   final _styleRepository = DialogStyleRepository();
+  final _documentText = DocumentTextService();
   final _geminiDialogue = GeminiDialogueService();
   final _tts = TtsService();
   final _audioPlayer = NativeAudioPlayer();
@@ -54,12 +111,40 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _playlistPlaying = false;
   bool _playlistPaused = false;
   bool _playlistStopRequested = false;
+  double? _dialogueProgress;
   String? _activeBubbleId;
+  String? _lastSnackMessage;
+  DateTime? _lastSnackAt;
+  Timer? _editSaveTimer;
+  BanterProject? _pendingEditProject;
+  Future<void> _saveQueue = Future<void>.value();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _editSaveTimer?.cancel();
+    final pending = _pendingEditProject;
+    if (pending != null) {
+      unawaited(_saveProject(pending, select: false, refresh: false));
+    }
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(_flushPendingEditSave());
+    }
   }
 
   Future<void> _load() async {
@@ -81,19 +166,104 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _showProject(
+    BanterProject? project, {
+    List<ProjectSummary>? projects,
+  }) async {
+    if (!mounted) return;
+    if (!identical(_project, project)) {
+      await _flushPendingEditSave(select: false);
+    }
+    if (!mounted) return;
+    _bubbleKeys.clear();
+    setState(() {
+      _project = project;
+      _activeBubbleId = null;
+      if (projects != null) _projects = projects;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.jumpTo(0);
+    });
+  }
+
   Future<void> _save() async {
     final project = _project;
-    if (project != null) {
-      await _repository.save(project, select: true);
+    if (project == null) return;
+    await _saveProject(project);
+  }
+
+  Future<void> _saveProject(
+    BanterProject project, {
+    bool select = true,
+    bool refresh = true,
+  }) async {
+    final previous = _saveQueue;
+    final completed = Completer<void>();
+    _saveQueue = completed.future;
+    try {
+      await previous;
+      await _repository.save(project, select: select);
+    } finally {
+      completed.complete();
+    }
+    if (refresh && mounted && identical(_project, project)) {
       await _refreshProjects();
     }
   }
 
-  void _snack(String message) {
+  void _scheduleEditSave(BanterProject project) {
+    _pendingEditProject = project;
+    _editSaveTimer?.cancel();
+    _editSaveTimer = Timer(
+      const Duration(milliseconds: 400),
+      () => unawaited(_flushPendingEditSave()),
+    );
+  }
+
+  Future<void> _flushPendingEditSave({bool select = true}) async {
+    _editSaveTimer?.cancel();
+    _editSaveTimer = null;
+    final project = _pendingEditProject;
+    _pendingEditProject = null;
+    if (project == null) return;
+    await _saveProject(
+      project,
+      select: select && identical(_project, project),
+      refresh: identical(_project, project),
+    );
+  }
+
+  void _discardPendingEdit(BanterProject? project) {
+    if (!identical(_pendingEditProject, project)) return;
+    _editSaveTimer?.cancel();
+    _editSaveTimer = null;
+    _pendingEditProject = null;
+  }
+
+  void _snack(String message, {String? actionLabel, VoidCallback? onAction}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    final now = DateTime.now();
+    if (_lastSnackMessage == message &&
+        _lastSnackAt != null &&
+        now.difference(_lastSnackAt!) < const Duration(seconds: 3)) {
+      return;
+    }
+    _lastSnackMessage = message;
+    _lastSnackAt = now;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: onAction == null
+            ? const Duration(seconds: 4)
+            : const Duration(seconds: 10),
+        action: onAction == null
+            ? null
+            : SnackBarAction(label: actionLabel!, onPressed: onAction),
+      ),
+    );
   }
 
   bool _hasValidSpeech(String text) =>
@@ -205,11 +375,51 @@ class _HomeScreenState extends State<HomeScreen> {
     _snack('正在停止，当前条目完成后暂停。');
   }
 
+  Future<void> _toggleWorkspaceCollapsed() async {
+    setState(() {
+      _settings.workspaceCollapsed = !_settings.workspaceCollapsed;
+    });
+    await _settingsRepository.save(_settings);
+  }
+
   Future<void> _showGenerateDialogueDialog() async {
     if (_styles.isEmpty || _dialogueGenerating) return;
     final current = _project ?? BanterProject.initial();
     var selectedStyleId = _settings.dialogStyleId;
+    var selectedInputMode = _DialogueInputMode.values.firstWhere(
+      (mode) => mode.name == _settings.dialogueInputMode,
+      orElse: () => _DialogueInputMode.topic,
+    );
+    PlatformFile? selectedFile;
+    final rememberedFilePath = _settings.lastDialogueFilePath.trim();
+    if (rememberedFilePath.isNotEmpty) {
+      final rememberedFile = File(rememberedFilePath);
+      if (await rememberedFile.exists()) {
+        final size = await rememberedFile.length();
+        final name = _settings.lastDialogueFileName.trim().isEmpty
+            ? rememberedFile.uri.pathSegments.last
+            : _settings.lastDialogueFileName.trim();
+        if (size > 0 && size <= DocumentTextService.maxUploadBytesFor(name)) {
+          selectedFile = PlatformFile(
+            name: name,
+            size: size,
+            path: rememberedFilePath,
+          );
+        }
+      }
+      if (selectedFile == null) {
+        _settings.lastDialogueFilePath = '';
+        _settings.lastDialogueFileName = '';
+        _settings.lastDialogueFileSize = 0;
+        await _settingsRepository.save(_settings);
+      }
+    }
+    if (!mounted) return;
     final controller = TextEditingController(text: _settings.lastDialogueInput);
+    final urlController = TextEditingController(
+      text: _settings.lastDialogueUrl,
+    );
+    final additionalController = TextEditingController();
     final result = await showModalBottomSheet<_DialogueGenerateRequest>(
       context: context,
       isScrollControlled: true,
@@ -252,9 +462,43 @@ class _HomeScreenState extends State<HomeScreen> {
                 InkWell(
                   borderRadius: BorderRadius.circular(22),
                   onTap: () async {
+                    final mode = await _pickDialogueInputMode(
+                      selectedInputMode,
+                    );
+                    if (mode == null) return;
+                    if (mode != _DialogueInputMode.topic) {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                    }
+                    setDialogState(() => selectedInputMode = mode);
+                    _settings.dialogueInputMode = mode.name;
+                    await _settingsRepository.save(_settings);
+                  },
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: '输入来源',
+                      suffixIcon: Icon(Icons.expand_more_rounded),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(selectedInputMode.icon, size: 20),
+                        const SizedBox(width: 10),
+                        Text(
+                          selectedInputMode.label,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                InkWell(
+                  borderRadius: BorderRadius.circular(22),
+                  onTap: () async {
                     final style = await _pickDialogueStyle(selectedStyleId);
                     if (style == null) return;
                     setDialogState(() => selectedStyleId = style.id);
+                    _settings.dialogStyleId = style.id;
+                    await _settingsRepository.save(_settings);
                   },
                   child: InputDecorator(
                     decoration: const InputDecoration(
@@ -271,38 +515,230 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  minLines: 8,
-                  maxLines: 14,
-                  decoration: InputDecoration(
-                    labelText: '关键词或话题',
-                    hintText: '例如：能量守恒',
-                    alignLabelWithHint: true,
-                    prefixIcon: const Icon(Icons.edit_note_rounded),
-                    suffixIcon: IconButton(
-                      onPressed: controller.clear,
-                      icon: const Icon(Icons.close_rounded),
-                      tooltip: '清空',
-                    ),
+                if (selectedInputMode == _DialogueInputMode.topic)
+                  Stack(
+                    children: [
+                      TextField(
+                        controller: controller,
+                        autofocus: true,
+                        minLines: 8,
+                        maxLines: 14,
+                        decoration: const InputDecoration(
+                          labelText: '关键词或话题',
+                          hintText: '例如：能量守恒',
+                          alignLabelWithHint: true,
+                          contentPadding: EdgeInsets.fromLTRB(16, 20, 52, 48),
+                        ),
+                      ),
+                      Positioned(
+                        right: 10,
+                        bottom: 10,
+                        child: IconButton(
+                          onPressed: controller.clear,
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          tooltip: '清空',
+                          style: IconButton.styleFrom(
+                            minimumSize: const Size.square(36),
+                            maximumSize: const Size.square(36),
+                            padding: EdgeInsets.zero,
+                            backgroundColor: Colors.black26,
+                            foregroundColor: Colors.white70,
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                else if (selectedInputMode == _DialogueInputMode.file)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(22),
+                        onTap: () async {
+                          final result = await FilePicker.platform.pickFiles(
+                            type: FileType.custom,
+                            allowedExtensions:
+                                DocumentTextService.supportedExtensions,
+                            allowMultiple: false,
+                          );
+                          final file = result?.files.single;
+                          if (file == null) return;
+                          if (file.path == null) {
+                            _snack('无法读取这个文件，请从本机存储中重新选择。');
+                            return;
+                          }
+                          if (file.size == 0) {
+                            _snack('不能选择空文件。');
+                            return;
+                          }
+                          if (file.size >
+                              DocumentTextService.maxUploadBytesFor(
+                                file.name,
+                              )) {
+                            _snack(
+                              '文件超过 ${DocumentTextService.maxSizeLabel(file.name)} 上传限制。',
+                            );
+                            return;
+                          }
+                          setDialogState(() => selectedFile = file);
+                          _settings.lastDialogueFilePath = file.path!;
+                          _settings.lastDialogueFileName = file.name;
+                          _settings.lastDialogueFileSize = file.size;
+                          await _settingsRepository.save(_settings);
+                        },
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: '文档或图片',
+                            suffixIcon: Icon(Icons.file_open_rounded),
+                          ),
+                          child: SizedBox(
+                            height: 116,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  selectedFile == null
+                                      ? Icons.upload_file_rounded
+                                      : DocumentTextService.isImage(
+                                          selectedFile!.name,
+                                        )
+                                      ? Icons.image_rounded
+                                      : Icons.description_rounded,
+                                  size: 34,
+                                  color: const Color(0xFF8B5CF6),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  selectedFile?.name ?? '选择文档或图片',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  selectedFile == null
+                                      ? '文档最大 25 MiB，图片最大 15 MiB'
+                                      : _fileSizeLabel(selectedFile!.size),
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: .50),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: additionalController,
+                        minLines: 2,
+                        maxLines: 4,
+                        maxLength: 2000,
+                        decoration: const InputDecoration(
+                          labelText: '补充说明（可选）',
+                          hintText: '例如：重点讨论第二张图表',
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  Stack(
+                    children: [
+                      TextField(
+                        controller: urlController,
+                        keyboardType: TextInputType.url,
+                        textInputAction: TextInputAction.done,
+                        autocorrect: false,
+                        minLines: 3,
+                        maxLines: 6,
+                        decoration: const InputDecoration(
+                          labelText: '网页链接',
+                          hintText: 'https://mp.weixin.qq.com/s/...',
+                          alignLabelWithHint: true,
+                          contentPadding: EdgeInsets.fromLTRB(16, 20, 52, 48),
+                        ),
+                      ),
+                      Positioned(
+                        right: 6,
+                        bottom: 6,
+                        child: IconButton(
+                          onPressed: () {
+                            urlController.clear();
+                            _settings.lastDialogueUrl = '';
+                            unawaited(_settingsRepository.save(_settings));
+                          },
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: '清空网址',
+                        ),
+                      ),
+                    ],
                   ),
-                ),
                 const SizedBox(height: 14),
                 FilledButton.icon(
                   onPressed: () {
-                    final input = controller.text.trim();
-                    if (input.isEmpty) return;
+                    if (selectedInputMode == _DialogueInputMode.topic) {
+                      final input = controller.text.trim();
+                      if (input.isEmpty) return;
+                      Navigator.pop(
+                        context,
+                        _DialogueGenerateRequest.topic(
+                          input: input,
+                          styleId: selectedStyleId,
+                        ),
+                      );
+                      return;
+                    }
+                    if (selectedInputMode == _DialogueInputMode.url) {
+                      final url = urlController.text.trim();
+                      final uri = Uri.tryParse(url);
+                      if (uri == null ||
+                          !{'http', 'https'}.contains(uri.scheme) ||
+                          uri.host.isEmpty) {
+                        _snack('请输入完整的 http 或 https 网页链接。');
+                        return;
+                      }
+                      Navigator.pop(
+                        context,
+                        _DialogueGenerateRequest.url(
+                          url: url,
+                          styleId: selectedStyleId,
+                        ),
+                      );
+                      return;
+                    }
+                    final file = selectedFile;
+                    if (file?.path == null) {
+                      _snack('请先选择一个文档或图片。');
+                      return;
+                    }
                     Navigator.pop(
                       context,
-                      _DialogueGenerateRequest(
-                        input: input,
+                      _DialogueGenerateRequest.file(
+                        filePath: file!.path!,
+                        fileName: file.name,
+                        additionalText: additionalController.text.trim(),
                         styleId: selectedStyleId,
                       ),
                     );
                   },
-                  icon: const Icon(Icons.auto_awesome_rounded),
-                  label: const Text('生成对话'),
+                  icon: Icon(
+                    selectedInputMode == _DialogueInputMode.file
+                        ? Icons.upload_rounded
+                        : selectedInputMode == _DialogueInputMode.url
+                        ? Icons.language_rounded
+                        : Icons.auto_awesome_rounded,
+                  ),
+                  label: Text(
+                    selectedInputMode == _DialogueInputMode.file
+                        ? '上传并生成'
+                        : selectedInputMode == _DialogueInputMode.url
+                        ? '提取并生成'
+                        : '生成对话',
+                  ),
                 ),
               ],
             ),
@@ -310,14 +746,67 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       ),
     );
+    controller.dispose();
+    urlController.dispose();
+    additionalController.dispose();
     if (result == null) return;
-    _settings.lastDialogueInput = result.input;
+    _settings.dialogueInputMode = result.mode.name;
+    if (result.mode == _DialogueInputMode.topic) {
+      _settings.lastDialogueInput = result.input!;
+    } else if (result.mode == _DialogueInputMode.url) {
+      _settings.lastDialogueUrl = result.url!;
+    }
     await _settingsRepository.save(_settings);
     await _generateDialogue(
-      input: result.input,
+      request: result,
       styleId: result.styleId,
       baseProject: current,
     );
+  }
+
+  Future<_DialogueInputMode?> _pickDialogueInputMode(
+    _DialogueInputMode selectedMode,
+  ) {
+    return showModalBottomSheet<_DialogueInputMode>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          itemCount: _DialogueInputMode.values.length,
+          separatorBuilder: (_, index) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final mode = _DialogueInputMode.values[index];
+            final selected = mode == selectedMode;
+            return ListTile(
+              selected: selected,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+              selectedTileColor: const Color(0xFF8B5CF6).withValues(alpha: .20),
+              leading: Icon(mode.icon),
+              title: Text(
+                mode.label,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: Text(mode.description),
+              trailing: selected
+                  ? const Icon(Icons.check_circle_rounded)
+                  : null,
+              onTap: () => Navigator.pop(context, mode),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  String _fileSizeLabel(int bytes) {
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MiB';
+    }
+    return '${(bytes / 1024).toStringAsFixed(0)} KiB';
   }
 
   Future<DialogStyle?> _pickDialogueStyle(String selectedStyleId) {
@@ -364,7 +853,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _generateDialogue({
-    required String input,
+    required _DialogueGenerateRequest request,
     required String styleId,
     required BanterProject baseProject,
   }) async {
@@ -372,38 +861,114 @@ class _HomeScreenState extends State<HomeScreen> {
       (style) => style.id == styleId,
       orElse: () => _styles.first,
     );
-    if (_settings.geminiApiKey.trim().isEmpty) {
-      _snack('请先在设置里填写 Gemini API Key。');
-      return;
-    }
-
-    setState(() => _dialogueGenerating = true);
+    setState(() {
+      _dialogueGenerating = true;
+      _dialogueProgress = request.mode == _DialogueInputMode.file ? 0 : null;
+    });
+    Object? failure;
     try {
-      final bubbles = await _geminiDialogue.generateDialogue(
-        input: input.trim(),
-        style: style,
-        settings: _settings,
-        project: baseProject,
-      );
+      late DialogueGenerationResult generated;
+      switch (request.mode) {
+        case _DialogueInputMode.file:
+          if (DocumentTextService.isImage(request.fileName!)) {
+            generated = await _geminiDialogue.generateDialogueFromImage(
+              path: request.filePath!,
+              fileName: request.fileName!,
+              additionalText: request.additionalText ?? '',
+              style: style,
+              settings: _settings,
+              project: baseProject,
+            );
+            if (mounted) setState(() => _dialogueProgress = 1);
+            break;
+          }
+          var lastProgress = -1.0;
+          final extractedText = await _documentText.convertFile(
+            path: request.filePath!,
+            fileName: request.fileName!,
+            onUploadProgress: (progress) {
+              if (!mounted || progress - lastProgress < .01) return;
+              lastProgress = progress;
+              setState(() => _dialogueProgress = progress);
+            },
+            onUploadFinished: () {
+              if (mounted) setState(() => _dialogueProgress = null);
+            },
+          );
+          final additionalText = request.additionalText?.trim() ?? '';
+          final input = additionalText.isEmpty
+              ? extractedText
+              : '$extractedText\n\n用户补充要求：$additionalText';
+          generated = await _geminiDialogue.generateDialogue(
+            input: input,
+            style: style,
+            settings: _settings,
+            project: baseProject,
+            onProgress: (progress) {
+              if (mounted) setState(() => _dialogueProgress = progress);
+            },
+          );
+        case _DialogueInputMode.url:
+          final input = await _documentText.convertUrl(request.url!);
+          generated = await _geminiDialogue.generateDialogue(
+            input: input,
+            style: style,
+            settings: _settings,
+            project: baseProject,
+            onProgress: (progress) {
+              if (mounted) setState(() => _dialogueProgress = progress);
+            },
+          );
+        case _DialogueInputMode.topic:
+          generated = await _geminiDialogue.generateDialogue(
+            input: request.input!.trim(),
+            style: style,
+            settings: _settings,
+            project: baseProject,
+            onProgress: (progress) {
+              if (mounted) setState(() => _dialogueProgress = progress);
+            },
+          );
+      }
       final project = BanterProject.initial(
-        name: '${input.trim()}_${style.name}',
-      )..bubbles = bubbles;
+        name: '${generated.title}_${style.name}',
+      )..bubbles = generated.bubbles;
       _settings.dialogStyleId = style.id;
       _settings.applyNamesTo(project);
       await _settingsRepository.save(_settings);
       await _repository.save(project, select: true);
       final projects = await _repository.listProjects();
       if (!mounted) return;
-      setState(() {
-        _project = project;
-        _projects = projects;
-      });
-      _snack('已生成 ${bubbles.length} 条对话。');
+      await _showProject(project, projects: projects);
+      _snack('已生成 ${generated.bubbles.length} 条对话。');
     } catch (error) {
-      _snack('生成对话失败：$error');
+      failure = error;
     } finally {
-      if (mounted) setState(() => _dialogueGenerating = false);
+      if (mounted) {
+        setState(() {
+          _dialogueGenerating = false;
+          _dialogueProgress = null;
+        });
+      }
     }
+    if (failure != null && mounted) {
+      _snack(
+        '生成对话失败：${_friendlyError(failure)}',
+        actionLabel: '重试',
+        onAction: () => unawaited(
+          _generateDialogue(
+            request: request,
+            styleId: styleId,
+            baseProject: baseProject,
+          ),
+        ),
+      );
+    }
+  }
+
+  String _friendlyError(Object? error) {
+    final text = error.toString();
+    return text.startsWith('Exception: ') ? text.substring(11) : text;
   }
 
   Future<void> _play(DialogueBubble bubble) async {
@@ -412,6 +977,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _snack('这条还没有音频，请先生成。');
       return;
     }
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _activeBubbleId = bubble.id);
     await _scrollToBubble(bubble.id);
     await _audioPlayer.play(path, speed: _settings.playbackSpeed);
@@ -420,29 +986,39 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _playAll({String? startBubbleId}) async {
     final project = _project;
     if (project == null || _playlistPlaying) return;
-    final startIndex = startBubbleId == null
+    final requestedStartIndex = startBubbleId == null
         ? 0
         : project.bubbles.indexWhere((bubble) => bubble.id == startBubbleId);
-    final source = startIndex <= 0
-        ? project.bubbles
-        : project.bubbles.skip(startIndex);
-    final ready = source.where((bubble) {
-      if (_settings.skipBlankOnPlayback && !_hasValidSpeech(bubble.content)) {
-        return false;
-      }
-      return bubble.audioPath?.isNotEmpty == true;
-    }).toList();
-    if (ready.isEmpty) {
+    final startIndex = requestedStartIndex < 0 ? 0 : requestedStartIndex;
+    final source = project.bubbles.skip(startIndex);
+    final canPlayOrWait = source.any(
+      (bubble) =>
+          bubble.audioPath?.isNotEmpty == true ||
+          bubble.status == BubbleStatus.loading,
+    );
+    if (!canPlayOrWait && !_batchGenerating) {
       _snack('还没有可播放的音频，请先生成。');
       return;
     }
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _playlistPlaying = true;
       _playlistPaused = false;
       _playlistStopRequested = false;
     });
     try {
-      for (final bubble in ready) {
+      for (var index = startIndex; index < project.bubbles.length; index++) {
+        if (!mounted || _playlistStopRequested) break;
+        if (!identical(_project, project)) break;
+        final bubble = project.bubbles[index];
+        if (_settings.skipBlankOnPlayback && !_hasValidSpeech(bubble.content)) {
+          continue;
+        }
+        if (bubble.audioPath?.isNotEmpty != true) {
+          await _waitForBubbleAudio(project, bubble);
+        }
+        if (!mounted || _playlistStopRequested) break;
+        await _waitUntilPlaylistResumed();
         if (!mounted || _playlistStopRequested) break;
         final path = bubble.audioPath;
         if (path == null || path.isEmpty) continue;
@@ -468,6 +1044,27 @@ class _HomeScreenState extends State<HomeScreen> {
           _snack('已播放完毕。');
         }
       }
+    }
+  }
+
+  Future<void> _waitForBubbleAudio(
+    BanterProject project,
+    DialogueBubble bubble,
+  ) async {
+    while (mounted && !_playlistStopRequested) {
+      if (!identical(_project, project) ||
+          bubble.audioPath?.isNotEmpty == true ||
+          bubble.status == BubbleStatus.error) {
+        return;
+      }
+      if (!_batchGenerating && bubble.status != BubbleStatus.loading) return;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+  }
+
+  Future<void> _waitUntilPlaylistResumed() async {
+    while (mounted && !_playlistStopRequested && _playlistPaused) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
     }
   }
 
@@ -507,15 +1104,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _scrollToBubble(String id) async {
-    await Future<void>.delayed(const Duration(milliseconds: 30));
-    if (!mounted) return;
-    final bubbleContext = _bubbleKeys[id]?.currentContext;
+    if (!mounted || !_scrollController.hasClients) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_scrollController.hasClients) return;
+    var bubbleContext = _bubbleKeys[id]?.currentContext;
+    if (bubbleContext == null) {
+      final bubbles = _project?.bubbles ?? const <DialogueBubble>[];
+      final index = bubbles.indexWhere((bubble) => bubble.id == id);
+      if (index < 0) return;
+      final maxExtent = _scrollController.position.maxScrollExtent;
+      final target = bubbles.length <= 1
+          ? 0.0
+          : maxExtent * index / (bubbles.length - 1);
+      await _scrollController.animateTo(
+        target.clamp(0.0, maxExtent),
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      bubbleContext = _bubbleKeys[id]?.currentContext;
+    }
     if (bubbleContext == null || !bubbleContext.mounted) return;
     await Scrollable.ensureVisible(
       bubbleContext,
-      duration: const Duration(milliseconds: 320),
+      duration: const Duration(milliseconds: 280),
       curve: Curves.easeOutCubic,
-      alignment: .25,
+      alignment: .18,
+      alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
     );
   }
 
@@ -544,10 +1160,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _settings.applyNamesTo(project);
         await _repository.save(project, select: true);
         final projects = await _repository.listProjects();
-        setState(() {
-          _project = project;
-          _projects = projects;
-        });
+        await _showProject(project, projects: projects);
         _snack('已导入项目包：${project.name}');
       } catch (error) {
         _snack('导入项目包失败：$error');
@@ -604,10 +1217,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _settings.applyNamesTo(project);
       await _repository.save(project, select: true);
       final projects = await _repository.listProjects();
-      setState(() {
-        _project = project;
-        _projects = projects;
-      });
+      await _showProject(project, projects: projects);
       _snack('已导入 ${imported.length} 条对话');
     } catch (error) {
       _snack('导入失败：$error');
@@ -626,19 +1236,47 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _exportMergedAudioAndShare() async {
-    final project = _project!;
-    try {
-      final audioPath = await _repository.exportMergedAudio(
-        project,
-        skipBlank: _settings.skipBlankOnPlayback,
-      );
-      await Share.shareXFiles([
-        XFile(audioPath),
-      ], text: '泊睿妙语合成音频：${project.name}');
-    } catch (error) {
-      _snack('导出合成音频失败：$error');
+  Future<void> _openMergedAudioScreen() async {
+    final project = _project;
+    if (project == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            MergedAudioScreen(project: project, settings: _settings),
+      ),
+    );
+  }
+
+  Future<void> _openDialogueTextScreen() async {
+    final project = _project;
+    if (project == null) return;
+    var exportTitle = project.name;
+    final styleNames = _styles.map((style) => style.name).toList()
+      ..sort((left, right) => right.length.compareTo(left.length));
+    for (final styleName in styleNames) {
+      final suffix = '_$styleName';
+      if (exportTitle.endsWith(suffix)) {
+        exportTitle = exportTitle.substring(
+          0,
+          exportTitle.length - suffix.length,
+        );
+        break;
+      }
     }
+    await _flushPendingEditSave();
+    if (!mounted || !identical(_project, project)) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => DialogueTextScreen(
+          project: project,
+          exportTitle: exportTitle,
+          hostAvatarSeed: _settings.hostAvatarSeed,
+          guestAvatarSeed: _settings.guestAvatarSeed,
+          hostAvatarPath: _settings.hostAvatarPath,
+          guestAvatarPath: _settings.guestAvatarPath,
+        ),
+      ),
+    );
   }
 
   Future<void> _newProject() async {
@@ -648,10 +1286,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _settings.applyNamesTo(project);
     await _repository.save(project, select: true);
     final projects = await _repository.listProjects();
-    setState(() {
-      _project = project;
-      _projects = projects;
-    });
+    await _showProject(project, projects: projects);
   }
 
   Future<String?> _askName(String title, String initial) async {
@@ -738,7 +1373,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (project == null) return;
     if (!mounted) return;
     Navigator.pop(context);
-    setState(() => _project = project);
+    await _showProject(project);
   }
 
   Future<void> _deleteProject(ProjectSummary summary) async {
@@ -760,17 +1395,15 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (confirm != true) return;
-    await _repository.deleteProject(summary.fileName);
     final currentDeleted = _project?.fileName == summary.fileName;
+    if (currentDeleted) _discardPendingEdit(_project);
+    await _repository.deleteProject(summary.fileName);
     final projects = await _repository.listProjects();
     if (currentDeleted) {
       final next = projects.isEmpty
           ? null
           : await _repository.loadByFileName(projects.first.fileName);
-      setState(() {
-        _project = next;
-        _projects = projects;
-      });
+      await _showProject(next, projects: projects);
     } else {
       setState(() => _projects = projects);
     }
@@ -797,6 +1430,7 @@ class _HomeScreenState extends State<HomeScreen> {
             )
             .length ??
         0;
+    final totalCount = project?.bubbles.length ?? 0;
     return Scaffold(
       extendBodyBehindAppBar: true,
       drawer: Drawer(
@@ -854,68 +1488,66 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  itemCount: _projects.length,
-                  itemBuilder: (context, index) {
-                    final item = _projects[index];
-                    final selected = item.fileName == project?.fileName;
-                    return Dismissible(
-                      key: ValueKey(item.fileName),
-                      direction: DismissDirection.endToStart,
-                      confirmDismiss: (_) async {
-                        await _deleteProject(item);
-                        return false;
-                      },
-                      background: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 5),
-                        padding: const EdgeInsets.symmetric(horizontal: 18),
-                        alignment: Alignment.centerRight,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(18),
-                          color: const Color(0xFFEF4444).withValues(alpha: .85),
+                child: SlidableAutoCloseBehavior(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    itemCount: _projects.length,
+                    itemBuilder: (context, index) {
+                      final item = _projects[index];
+                      final selected = item.fileName == project?.fileName;
+                      return Slidable(
+                        key: ValueKey(item.fileName),
+                        groupTag: 'projects',
+                        endActionPane: ActionPane(
+                          extentRatio: .22,
+                          motion: const BehindMotion(),
+                          children: [
+                            SlidableAction(
+                              onPressed: (_) => _deleteProject(item),
+                              backgroundColor: const Color(0xFFB4233C),
+                              foregroundColor: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              icon: Icons.delete_outline_rounded,
+                              label: '删除',
+                            ),
+                          ],
                         ),
-                        child: const Icon(Icons.delete_rounded),
-                      ),
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 5),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(18),
-                          color: selected
-                              ? const Color(0xFF8B5CF6).withValues(alpha: .22)
-                              : Colors.white.withValues(alpha: .04),
-                          border: Border.all(
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 5),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(18),
                             color: selected
-                                ? const Color(0xFF8B5CF6)
-                                : Colors.white.withValues(alpha: .08),
+                                ? const Color(0xFF8B5CF6).withValues(alpha: .22)
+                                : Colors.white.withValues(alpha: .04),
+                            border: Border.all(
+                              color: selected
+                                  ? const Color(0xFF8B5CF6)
+                                  : Colors.white.withValues(alpha: .08),
+                            ),
+                          ),
+                          child: ListTile(
+                            leading: Icon(
+                              selected
+                                  ? Icons.radio_button_checked
+                                  : Icons.article_outlined,
+                            ),
+                            title: Text(
+                              item.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${item.bubbleCount} 条 · ${item.updatedAt.toLocal().toString().substring(0, 16)}',
+                            ),
+                            onTap: () => _selectProject(item.fileName),
                           ),
                         ),
-                        child: ListTile(
-                          leading: Icon(
-                            selected
-                                ? Icons.radio_button_checked
-                                : Icons.article_outlined,
-                          ),
-                          title: Text(
-                            item.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                          subtitle: Text(
-                            '${item.bubbleCount} 条 · ${item.updatedAt.toLocal().toString().substring(0, 16)}',
-                          ),
-                          onTap: () => _selectProject(item.fileName),
-                          trailing: IconButton(
-                            tooltip: '删除项目',
-                            color: const Color(0xFFFCA5A5),
-                            onPressed: () => _deleteProject(item),
-                            icon: const Icon(Icons.delete_outline),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
               ),
             ],
@@ -945,18 +1577,12 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             onPressed: _dialogueGenerating ? null : _showGenerateDialogueDialog,
-            icon: _dialogueGenerating
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.auto_awesome_rounded),
+            icon: const Icon(Icons.auto_awesome_rounded),
             tooltip: '智能生成对话',
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.folder_open_rounded),
-            tooltip: '导入/导出项目',
+            icon: const Icon(Icons.import_export_rounded),
+            tooltip: '导入与导出',
             color: const Color(0xFF1B1D35),
             onSelected: (value) {
               if (value == 'paste') {
@@ -964,7 +1590,9 @@ class _HomeScreenState extends State<HomeScreen> {
               } else if (value == 'file') {
                 _importFromFile();
               } else if (value == 'export_audio' && project != null) {
-                _exportMergedAudioAndShare();
+                _openMergedAudioScreen();
+              } else if (value == 'plain_text' && project != null) {
+                _openDialogueTextScreen();
               } else if (value == 'export' && project != null) {
                 _exportAndShare();
               }
@@ -973,10 +1601,9 @@ class _HomeScreenState extends State<HomeScreen> {
               const PopupMenuItem(value: 'paste', child: Text('粘贴导入 JSON')),
               const PopupMenuItem(value: 'file', child: Text('从文件/ZIP 导入')),
               if (project != null)
-                const PopupMenuItem(
-                  value: 'export_audio',
-                  child: Text('导出合成音频'),
-                ),
+                const PopupMenuItem(value: 'plain_text', child: Text('查看对话全文')),
+              if (project != null)
+                const PopupMenuItem(value: 'export_audio', child: Text('合并音频')),
               if (project != null)
                 const PopupMenuItem(value: 'export', child: Text('导出/分享项目包')),
             ],
@@ -988,241 +1615,305 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: NeonScaffold(
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: GlassPanel(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      Row(
+      body: Stack(
+        children: [
+          NeonScaffold(
+            child: SafeArea(
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                    child: GlassPanel(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '灵感对话工作台',
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _settings.workspaceCollapsed
+                                      ? '灵感对话工作台'
+                                      : '多角色播客生成台',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: Colors.white.withValues(alpha: .58),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                const Text(
-                                  '多角色播客生成台',
-                                  style: TextStyle(
-                                    fontSize: 22,
+                                    color: _settings.workspaceCollapsed
+                                        ? Colors.white.withValues(alpha: .76)
+                                        : Colors.white,
+                                    fontSize: _settings.workspaceCollapsed
+                                        ? 16
+                                        : 22,
                                     fontWeight: FontWeight.w900,
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(18),
-                              color: const Color(
-                                0xFF22D3EE,
-                              ).withValues(alpha: .14),
-                            ),
-                            child: Text(
-                              '$doneCount/${project?.bubbles.length ?? 0}',
-                              style: const TextStyle(
-                                color: Color(0xFF67E8F9),
-                                fontWeight: FontWeight.w900,
                               ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(99),
-                        child: LinearProgressIndicator(
-                          minHeight: 8,
-                          value: project == null || project.bubbles.isEmpty
-                              ? 0
-                              : doneCount / project.bubbles.length,
-                          backgroundColor: Colors.white.withValues(alpha: .09),
-                          valueColor: const AlwaysStoppedAnimation(
-                            Color(0xFFFF4FD8),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GradientButton(
-                              onPressed: project == null
-                                  ? null
-                                  : (_batchGenerating
-                                        ? _stopGenerateAll
-                                        : pendingCount == 0
-                                        ? null
-                                        : _generateAll),
-                              icon: Icons.bolt_rounded,
-                              label: _batchGenerating
-                                  ? '停止生成'
-                                  : pendingCount == 0
-                                  ? '全部已生成'
-                                  : '生成全部 ($pendingCount)',
-                              busy: _batchGenerating,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          IconButton.filledTonal(
-                            onPressed: project == null
-                                ? null
-                                : (_playlistPlaying
-                                      ? (_playlistPaused
-                                            ? _resumePlayAll
-                                            : _pausePlayAll)
-                                      : () => _playAll()),
-                            icon: Icon(
-                              _playlistPlaying
-                                  ? (_playlistPaused
-                                        ? Icons.play_arrow_rounded
-                                        : Icons.pause_rounded)
-                                  : Icons.playlist_play_rounded,
-                            ),
-                            tooltip: _playlistPlaying
-                                ? (_playlistPaused ? '继续播放' : '暂停播放')
-                                : '播放全部',
-                          ),
-                          if (_playlistPlaying) ...[
-                            const SizedBox(width: 8),
-                            IconButton.filledTonal(
-                              onPressed: _stopPlayAll,
-                              icon: const Icon(Icons.stop_rounded),
-                              tooltip: '停止播放',
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Expanded(
-                child: project == null
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: GlassPanel(
-                            padding: const EdgeInsets.all(20),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.library_add_rounded,
-                                  size: 42,
-                                  color: Color(0xFF67E8F9),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
                                 ),
-                                const SizedBox(height: 12),
-                                const Text(
-                                  '还没有项目',
-                                  style: TextStyle(
-                                    fontSize: 20,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(18),
+                                  color: const Color(
+                                    0xFF22D3EE,
+                                  ).withValues(alpha: .14),
+                                ),
+                                child: Text(
+                                  _settings.workspaceCollapsed
+                                      ? '共 $totalCount 条'
+                                      : '$doneCount/$totalCount',
+                                  style: const TextStyle(
+                                    color: Color(0xFF67E8F9),
                                     fontWeight: FontWeight.w900,
                                   ),
                                 ),
-                                const SizedBox(height: 10),
-                                FilledButton.icon(
-                                  onPressed: _newProject,
-                                  icon: const Icon(Icons.add_rounded),
-                                  label: const Text('新建项目'),
+                              ),
+                              const SizedBox(width: 4),
+                              IconButton(
+                                onPressed: () =>
+                                    unawaited(_toggleWorkspaceCollapsed()),
+                                icon: AnimatedRotation(
+                                  turns: _settings.workspaceCollapsed ? 0 : .5,
+                                  duration: const Duration(milliseconds: 220),
+                                  child: const Icon(
+                                    Icons.keyboard_arrow_down_rounded,
+                                  ),
                                 ),
-                              ],
-                            ),
+                                tooltip: _settings.workspaceCollapsed
+                                    ? '展开工作台'
+                                    : '收起工作台',
+                              ),
+                            ],
                           ),
-                        ),
-                      )
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(14, 0, 14, 112),
-                        itemCount: project.bubbles.length,
-                        itemBuilder: (context, index) {
-                          final bubble = project.bubbles[index];
-                          final key = _bubbleKeys.putIfAbsent(
-                            bubble.id,
-                            GlobalKey.new,
-                          );
-                          return KeyedSubtree(
-                            key: key,
-                            child: Dismissible(
-                              key: ValueKey('dismiss-${bubble.id}'),
-                              direction: DismissDirection.endToStart,
-                              confirmDismiss: (_) =>
-                                  _confirmDeleteBubble(bubble, index),
-                              onDismissed: (_) {
-                                _bubbleKeys.remove(bubble.id);
-                                setState(() => project.bubbles.removeAt(index));
-                                _save();
-                              },
-                              background: const SizedBox.shrink(),
-                              secondaryBackground: Container(
-                                margin: const EdgeInsets.symmetric(
-                                  vertical: 10,
-                                ),
-                                padding: const EdgeInsets.only(right: 24),
-                                alignment: Alignment.centerRight,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(30),
-                                  color: const Color(0xFF7F1D1D),
-                                ),
-                                child: const Column(
+                          AnimatedSize(
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeInOutCubic,
+                            alignment: Alignment.topCenter,
+                            child: _settings.workspaceCollapsed
+                                ? const SizedBox.shrink()
+                                : Column(
+                                    children: [
+                                      const SizedBox(height: 14),
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(99),
+                                        child: LinearProgressIndicator(
+                                          minHeight: 8,
+                                          value:
+                                              project == null ||
+                                                  project.bubbles.isEmpty
+                                              ? 0
+                                              : doneCount /
+                                                    project.bubbles.length,
+                                          backgroundColor: Colors.white
+                                              .withValues(alpha: .09),
+                                          valueColor:
+                                              const AlwaysStoppedAnimation(
+                                                Color(0xFFFF4FD8),
+                                              ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 14),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: GradientButton(
+                                              onPressed: project == null
+                                                  ? null
+                                                  : (_batchGenerating
+                                                        ? _stopGenerateAll
+                                                        : pendingCount == 0
+                                                        ? null
+                                                        : _generateAll),
+                                              icon: Icons.bolt_rounded,
+                                              label: _batchGenerating
+                                                  ? '停止生成'
+                                                  : pendingCount == 0
+                                                  ? '全部已生成'
+                                                  : '生成全部 ($pendingCount)',
+                                              busy: _batchGenerating,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          IconButton.filledTonal(
+                                            onPressed: project == null
+                                                ? null
+                                                : (_playlistPlaying
+                                                      ? (_playlistPaused
+                                                            ? _resumePlayAll
+                                                            : _pausePlayAll)
+                                                      : () => _playAll()),
+                                            icon: Icon(
+                                              _playlistPlaying
+                                                  ? (_playlistPaused
+                                                        ? Icons
+                                                              .play_arrow_rounded
+                                                        : Icons.pause_rounded)
+                                                  : Icons.playlist_play_rounded,
+                                            ),
+                                            tooltip: _playlistPlaying
+                                                ? (_playlistPaused
+                                                      ? '继续播放'
+                                                      : '暂停播放')
+                                                : '播放全部',
+                                          ),
+                                          if (_playlistPlaying) ...[
+                                            const SizedBox(width: 8),
+                                            IconButton.filledTonal(
+                                              onPressed: _stopPlayAll,
+                                              icon: const Icon(
+                                                Icons.stop_rounded,
+                                              ),
+                                              tooltip: '停止播放',
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: project == null
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: GlassPanel(
+                                padding: const EdgeInsets.all(20),
+                                child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(
-                                      Icons.delete_outline_rounded,
-                                      color: Colors.white,
+                                    const Icon(
+                                      Icons.library_add_rounded,
+                                      size: 42,
+                                      color: Color(0xFF67E8F9),
                                     ),
-                                    SizedBox(height: 4),
-                                    Text(
-                                      '删除',
+                                    const SizedBox(height: 12),
+                                    const Text(
+                                      '还没有项目',
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        fontSize: 20,
                                         fontWeight: FontWeight.w900,
                                       ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    FilledButton.icon(
+                                      onPressed: _newProject,
+                                      icon: const Icon(Icons.add_rounded),
+                                      label: const Text('新建项目'),
                                     ),
                                   ],
                                 ),
                               ),
-                              child: BubbleCard(
-                                bubble: bubble,
-                                sequence: index + 1,
-                                active: bubble.id == _activeBubbleId,
-                                onChanged: (value) {
-                                  setState(() {
-                                    bubble.content = value;
-                                    bubble.status = BubbleStatus.idle;
-                                  });
-                                  _save();
-                                },
-                                onGenerate: () => _generate(bubble),
-                                onPlay: () => _play(bubble),
-                                onPlayFromHere: () =>
-                                    _playAll(startBubbleId: bubble.id),
-                              ),
                             ),
-                          );
-                        },
-                      ),
+                          )
+                        : SlidableAutoCloseBehavior(
+                            child: ListView.builder(
+                              key: ValueKey(
+                                'conversation-${project.fileName ?? identityHashCode(project)}',
+                              ),
+                              controller: _scrollController,
+                              padding: const EdgeInsets.fromLTRB(
+                                14,
+                                0,
+                                14,
+                                112,
+                              ),
+                              itemCount: project.bubbles.length,
+                              itemBuilder: (context, index) {
+                                final bubble = project.bubbles[index];
+                                final key = _bubbleKeys.putIfAbsent(
+                                  bubble.id,
+                                  GlobalKey.new,
+                                );
+                                return KeyedSubtree(
+                                  key: key,
+                                  child: Slidable(
+                                    key: ValueKey('slide-${bubble.id}'),
+                                    groupTag: 'bubbles',
+                                    endActionPane: ActionPane(
+                                      extentRatio: .20,
+                                      motion: const BehindMotion(),
+                                      children: [
+                                        SlidableAction(
+                                          onPressed: (_) async {
+                                            final currentIndex = project.bubbles
+                                                .indexWhere(
+                                                  (item) =>
+                                                      item.id == bubble.id,
+                                                );
+                                            if (currentIndex < 0) return;
+                                            final confirmed =
+                                                await _confirmDeleteBubble(
+                                                  bubble,
+                                                  currentIndex,
+                                                );
+                                            if (!confirmed || !mounted) return;
+                                            _bubbleKeys.remove(bubble.id);
+                                            setState(
+                                              () => project.bubbles.removeWhere(
+                                                (item) => item.id == bubble.id,
+                                              ),
+                                            );
+                                            await _save();
+                                          },
+                                          backgroundColor: const Color(
+                                            0xFFB4233C,
+                                          ),
+                                          foregroundColor: Colors.white,
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                          icon: Icons.delete_outline_rounded,
+                                          label: '删除',
+                                        ),
+                                      ],
+                                    ),
+                                    child: BubbleCard(
+                                      bubble: bubble,
+                                      viewMode: _settings.conversationViewMode,
+                                      sequence: index + 1,
+                                      active: bubble.id == _activeBubbleId,
+                                      hostAvatarSeed: _settings.hostAvatarSeed,
+                                      guestAvatarSeed:
+                                          _settings.guestAvatarSeed,
+                                      hostAvatarPath: _settings.hostAvatarPath,
+                                      guestAvatarPath:
+                                          _settings.guestAvatarPath,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          bubble.content = value;
+                                          bubble.status = BubbleStatus.idle;
+                                          bubble.audioPath = null;
+                                          bubble.errorMessage = null;
+                                        });
+                                        _scheduleEditSave(project);
+                                      },
+                                      onEditingFinished: () =>
+                                          unawaited(_flushPendingEditSave()),
+                                      onGenerate: () => _generate(bubble),
+                                      onPlay: () => _play(bubble),
+                                      onPlayFromHere: () =>
+                                          _playAll(startBubbleId: bubble.id),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+          if (_dialogueGenerating)
+            _DialogueGeneratingOverlay(progress: _dialogueProgress),
+        ],
       ),
-      floatingActionButton: project == null
+      floatingActionButton: project == null || _dialogueGenerating
           ? null
           : Container(
               padding: const EdgeInsets.all(6),
@@ -1258,6 +1949,196 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
     );
   }
+}
+
+class _DialogueGeneratingOverlay extends StatefulWidget {
+  const _DialogueGeneratingOverlay({this.progress});
+
+  final double? progress;
+
+  @override
+  State<_DialogueGeneratingOverlay> createState() =>
+      _DialogueGeneratingOverlayState();
+}
+
+class _DialogueGeneratingOverlayState extends State<_DialogueGeneratingOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: ColoredBox(
+          color: const Color(0xFF070817).withValues(alpha: .54),
+          child: Center(
+            child: Container(
+              width: 132,
+              height: 132,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(26),
+                color: const Color(0xFF111326).withValues(alpha: .84),
+                border: Border.all(color: Colors.white.withValues(alpha: .13)),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF19D3FF).withValues(alpha: .24),
+                    blurRadius: 56,
+                    spreadRadius: 4,
+                  ),
+                  BoxShadow(
+                    color: const Color(0xFFFF4FD8).withValues(alpha: .2),
+                    blurRadius: 38,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) => CustomPaint(
+                  painter: _DialogueGeneratingPainter(
+                    phase: _controller.value,
+                    progress: widget.progress,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DialogueGeneratingPainter extends CustomPainter {
+  const _DialogueGeneratingPainter({required this.phase, this.progress});
+
+  final double phase;
+  final double? progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final pulse = .5 + .5 * math.sin(phase * math.pi * 2);
+    final glow = Paint()
+      ..color = const Color(0xFF8B5CF6).withValues(alpha: .12 + pulse * .1)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 13 + pulse * 5);
+    canvas.drawCircle(center, 31 + pulse * 4, glow);
+
+    _arc(
+      canvas,
+      center,
+      39,
+      phase * math.pi * 2,
+      math.pi * 1.05,
+      const Color(0xFF19D3FF),
+      3.2,
+    );
+    _arc(
+      canvas,
+      center,
+      48,
+      -phase * math.pi * 2.6 + .7,
+      math.pi * .68,
+      const Color(0xFFFF4FD8),
+      2.5,
+    );
+    _arc(
+      canvas,
+      center,
+      55,
+      phase * math.pi * 1.5 + 2.1,
+      math.pi * .32,
+      Colors.white.withValues(alpha: .7),
+      1.5,
+    );
+
+    final progressValue = progress;
+    if (progressValue != null) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: 59),
+        -math.pi / 2,
+        math.pi * 2 * progressValue.clamp(0, 1),
+        false,
+        Paint()
+          ..color = const Color(0xFFB6FF5C)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(phase * math.pi / 2);
+    final diamond = Path()
+      ..moveTo(0, -15 - pulse * 2)
+      ..lineTo(9 + pulse, 0)
+      ..lineTo(0, 15 + pulse * 2)
+      ..lineTo(-9 - pulse, 0)
+      ..close();
+    canvas.drawPath(
+      diamond,
+      Paint()
+        ..shader = const LinearGradient(
+          colors: [Color(0xFFFFFFFF), Color(0xFF19D3FF), Color(0xFFFF4FD8)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ).createShader(const Rect.fromLTWH(-12, -18, 24, 36)),
+    );
+    canvas.restore();
+
+    for (var i = 0; i < 4; i++) {
+      final angle = phase * math.pi * 2 + i * math.pi / 2;
+      final radius = 25 + (i.isEven ? pulse * 4 : (1 - pulse) * 4);
+      canvas.drawCircle(
+        center + Offset(math.cos(angle), math.sin(angle)) * radius,
+        1.4 + pulse,
+        Paint()..color = Colors.white.withValues(alpha: .55 + pulse * .35),
+      );
+    }
+  }
+
+  void _arc(
+    Canvas canvas,
+    Offset center,
+    double radius,
+    double start,
+    double sweep,
+    Color color,
+    double width,
+  ) {
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      start,
+      sweep,
+      false,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = width
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _DialogueGeneratingPainter oldDelegate) =>
+      oldDelegate.phase != phase || oldDelegate.progress != progress;
 }
 
 class _ScrollingTitle extends StatefulWidget {

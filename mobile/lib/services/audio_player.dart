@@ -12,6 +12,16 @@ class NativeAudioPlayer {
 
   Future<void> resume() => _channel.invokeMethod('resume');
 
+  Future<void> merge(
+    List<String> paths,
+    String outputPath, {
+    double speed = 1.0,
+  }) => _channel.invokeMethod('merge', {
+    'paths': paths,
+    'outputPath': outputPath,
+    'speed': speed,
+  });
+
   Future<Duration> duration(String path) async {
     final milliseconds = await _channel.invokeMethod<int>('duration', {
       'path': path,

@@ -1,6 +1,11 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/app_settings.dart';
+import '../models/conversation_view_mode.dart';
 import '../models/dialog_style.dart';
 import '../models/project.dart';
 import '../models/voice_preset.dart';
@@ -8,6 +13,7 @@ import '../services/dialog_style_repository.dart';
 import '../services/gemini_dialogue_service.dart';
 import '../services/voice_preset_repository.dart';
 import '../widgets/app_chrome.dart';
+import '../widgets/role_avatar.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.settings, this.project});
@@ -33,10 +39,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late String _hostVoiceId;
   late String _guestVoiceId;
   late String _dialogStyleId;
+  late ConversationViewMode _conversationViewMode;
+  late int _hostAvatarSeed;
+  late int _guestAvatarSeed;
+  late String _hostAvatarPath;
+  late String _guestAvatarPath;
   List<VoicePreset> _voices = const [];
   List<DialogStyle> _styles = const [];
   bool _loadingVoices = true;
   bool _loadingStyles = true;
+  bool _showGeminiApiKey = false;
 
   @override
   void initState() {
@@ -53,6 +65,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _playbackSpeed = settings.playbackSpeed;
     _skipBlankOnPlayback = settings.skipBlankOnPlayback;
     _dialogStyleId = settings.dialogStyleId;
+    _conversationViewMode = settings.conversationViewMode;
+    _hostAvatarSeed = settings.hostAvatarSeed;
+    _guestAvatarSeed = settings.guestAvatarSeed;
+    _hostAvatarPath = settings.hostAvatarPath;
+    _guestAvatarPath = settings.guestAvatarPath;
     _loadVoices();
     _loadStyles();
   }
@@ -184,6 +201,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  void _randomizeAvatar({required bool host}) {
+    var seed = AppSettings.newAvatarSeed();
+    final otherSeed = host ? _guestAvatarSeed : _hostAvatarSeed;
+    while (seed == otherSeed) {
+      seed = AppSettings.newAvatarSeed();
+    }
+    setState(() {
+      if (host) {
+        _hostAvatarSeed = seed;
+        _hostAvatarPath = '';
+      } else {
+        _guestAvatarSeed = seed;
+        _guestAvatarPath = '';
+      }
+    });
+  }
+
+  Future<void> _pickAvatarImage({required bool host}) async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    final sourcePath = result?.files.single.path;
+    if (sourcePath == null || sourcePath.isEmpty) return;
+    final source = File(sourcePath);
+    if (!await source.exists()) return;
+    final documents = await getApplicationDocumentsDirectory();
+    final avatarDir = Directory('${documents.path}/piraeus_banter/avatars');
+    if (!await avatarDir.exists()) await avatarDir.create(recursive: true);
+    final extension = result!.files.single.extension?.toLowerCase() ?? 'img';
+    final role = host ? 'host' : 'guest';
+    final target = File(
+      '${avatarDir.path}/${role}_${DateTime.now().millisecondsSinceEpoch}.$extension',
+    );
+    await source.copy(target.path);
+    if (!mounted) return;
+    setState(() {
+      if (host) {
+        _hostAvatarPath = target.path;
+      } else {
+        _guestAvatarPath = target.path;
+      }
+    });
+  }
+
+  Future<void> _editAvatar({required bool host}) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.casino_rounded),
+              title: const Text('随机换一个'),
+              onTap: () => Navigator.pop(context, 'random'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('从相册选择'),
+              onTap: () => Navigator.pop(context, 'image'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'random') {
+      _randomizeAvatar(host: host);
+    } else if (action == 'image') {
+      await _pickAvatarImage(host: host);
+    }
+  }
+
   void _saveAndClose() {
     final settings = widget.settings;
     final hostVoiceChanged = settings.hostVoiceId != _hostVoiceId;
@@ -206,6 +293,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     settings.playbackSpeed = _playbackSpeed;
     settings.skipBlankOnPlayback = _skipBlankOnPlayback;
     settings.dialogStyleId = _dialogStyleId;
+    settings.conversationViewMode = _conversationViewMode;
+    settings.hostAvatarSeed = _hostAvatarSeed;
+    settings.guestAvatarSeed = _guestAvatarSeed;
+    settings.hostAvatarPath = _hostAvatarPath;
+    settings.guestAvatarPath = _guestAvatarPath;
     final project = widget.project;
     if (project != null) {
       settings.applyNamesTo(project);
@@ -262,12 +354,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     const SizedBox(height: 18),
-                    TextField(
+                    _RoleIdentityEditor(
+                      label: '主持人',
                       controller: _hostName,
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.mic_rounded),
-                        labelText: '主持人名称',
-                      ),
+                      avatarSeed: _hostAvatarSeed,
+                      avatarPath: _hostAvatarPath,
+                      onEditAvatar: () => _editAvatar(host: true),
                     ),
                     const SizedBox(height: 12),
                     _VoiceSelectorTile(
@@ -280,12 +372,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: () => _pickVoice(host: true),
                     ),
                     const SizedBox(height: 18),
-                    TextField(
+                    _RoleIdentityEditor(
+                      label: '嘉宾',
                       controller: _guestName,
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.person_rounded),
-                        labelText: '嘉宾名称',
-                      ),
+                      avatarSeed: _guestAvatarSeed,
+                      avatarPath: _guestAvatarPath,
+                      onEditAvatar: () => _editAvatar(host: false),
                     ),
                     const SizedBox(height: 12),
                     _VoiceSelectorTile(
@@ -296,6 +388,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       id: _guestVoiceId,
                       hot: false,
                       onTap: () => _pickVoice(host: false),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      '头像风格灵感：Ugly Avatar · txstc55 · CC BY-NC 4.0',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: .42),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              GlassPanel(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.view_stream_rounded,
+                          color: Color(0xFF67E8F9),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          '显示样式',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final mode in ConversationViewMode.values)
+                          ChoiceChip(
+                            selected: _conversationViewMode == mode,
+                            avatar: Icon(
+                              mode == ConversationViewMode.chat
+                                  ? Icons.chat_bubble_outline_rounded
+                                  : Icons.dashboard_customize_rounded,
+                              size: 18,
+                            ),
+                            label: Text(mode.label),
+                            onSelected: (_) {
+                              setState(() => _conversationViewMode = mode);
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      _conversationViewMode.description,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: .56),
+                      ),
                     ),
                   ],
                 ),
@@ -325,11 +478,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 14),
                     TextField(
                       controller: _geminiApiKey,
-                      decoration: const InputDecoration(
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      decoration: InputDecoration(
                         labelText: 'Gemini API 密钥',
-                        prefixIcon: Icon(Icons.api_rounded),
+                        prefixIcon: const Icon(Icons.api_rounded),
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              onPressed: () => setState(
+                                () => _showGeminiApiKey = !_showGeminiApiKey,
+                              ),
+                              icon: Icon(
+                                _showGeminiApiKey
+                                    ? Icons.visibility_off_rounded
+                                    : Icons.visibility_rounded,
+                              ),
+                              tooltip: _showGeminiApiKey ? '隐藏密钥' : '显示密钥',
+                            ),
+                            IconButton(
+                              onPressed: _geminiApiKey.clear,
+                              icon: const Icon(Icons.close_rounded),
+                              tooltip: '清空密钥',
+                            ),
+                          ],
+                        ),
                       ),
-                      obscureText: true,
+                      obscureText: !_showGeminiApiKey,
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -470,6 +646,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _RoleIdentityEditor extends StatelessWidget {
+  const _RoleIdentityEditor({
+    required this.label,
+    required this.controller,
+    required this.avatarSeed,
+    required this.avatarPath,
+    required this.onEditAvatar,
+  });
+
+  final String label;
+  final TextEditingController controller;
+  final int avatarSeed;
+  final String avatarPath;
+  final VoidCallback onEditAvatar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        IconButton(
+          onPressed: onEditAvatar,
+          tooltip: '修改$label头像',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 68, height: 68),
+          icon: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              RoleAvatar(seed: avatarSeed, imagePath: avatarPath, size: 62),
+              Positioned(
+                right: -3,
+                bottom: -3,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFF17182D),
+                      width: 2,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.edit_rounded,
+                    size: 13,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: TextField(
+            controller: controller,
+            decoration: InputDecoration(labelText: '$label名称'),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -6,6 +6,20 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/project.dart';
 
+class MergedAudioExport {
+  MergedAudioExport({
+    required this.path,
+    required this.name,
+    required this.createdAt,
+    required this.bytes,
+  });
+
+  final String path;
+  final String name;
+  final DateTime createdAt;
+  final int bytes;
+}
+
 class ProjectRepository {
   static const _selectedFileName = 'selected_project.txt';
 
@@ -224,41 +238,78 @@ class ProjectRepository {
     return zipPath;
   }
 
-  Future<String> exportMergedAudio(
+  Future<List<String>> mergedAudioInputPaths(
     BanterProject project, {
     bool skipBlank = true,
+  }) async {
+    final paths = <String>[];
+    for (final bubble in project.bubbles) {
+      final path = bubble.audioPath;
+      if (path == null || path.isEmpty) continue;
+      if (skipBlank && !_hasValidSpeech(bubble.content)) continue;
+      if (await File(path).exists()) paths.add(path);
+    }
+    if (paths.isEmpty) {
+      throw Exception('没有可导出的音频，请先生成音频。');
+    }
+    return paths;
+  }
+
+  Future<String> mergedAudioOutputPath(
+    BanterProject project, {
+    required double speed,
   }) async {
     final exportDir = Directory('${(await appDir).path}/exports');
     if (!await exportDir.exists()) {
       await exportDir.create(recursive: true);
     }
-    final outputPath =
-        '${exportDir.path}/${sanitizeFileName(project.name)}_${DateTime.now().millisecondsSinceEpoch}.mp3';
-    final output = File(outputPath);
-    final sink = output.openWrite();
-    var count = 0;
-    try {
-      for (final bubble in project.bubbles) {
-        final path = bubble.audioPath;
-        if (path == null || path.isEmpty) continue;
-        if (skipBlank && !_hasValidSpeech(bubble.content)) continue;
-        final file = File(path);
-        if (!await file.exists()) continue;
-        sink.add(await file.readAsBytes());
-        count++;
-      }
-    } finally {
-      await sink.flush();
-      await sink.close();
-    }
+    final speedLabel = speed
+        .toStringAsFixed(speed % 1 == 0 ? 0 : 2)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+    return '${exportDir.path}/${sanitizeFileName(project.name)}_${speedLabel}x_${DateTime.now().millisecondsSinceEpoch}.m4a';
+  }
 
-    if (count == 0 || !await output.exists() || await output.length() == 0) {
+  Future<List<MergedAudioExport>> listMergedAudioExports() async {
+    final exportDir = Directory('${(await appDir).path}/exports');
+    if (!await exportDir.exists()) return const [];
+    final files = await exportDir
+        .list()
+        .where(
+          (entity) =>
+              entity is File &&
+              (entity.path.toLowerCase().endsWith('.mp3') ||
+                  entity.path.toLowerCase().endsWith('.m4a')),
+        )
+        .cast<File>()
+        .toList();
+    final exports = <MergedAudioExport>[];
+    for (final file in files) {
       try {
-        await output.delete();
+        final stat = await file.stat();
+        exports.add(
+          MergedAudioExport(
+            path: file.path,
+            name: file.uri.pathSegments.last,
+            createdAt: stat.modified,
+            bytes: stat.size,
+          ),
+        );
       } catch (_) {}
-      throw Exception('没有可导出的音频，请先生成音频。');
     }
-    return outputPath;
+    exports.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return exports;
+  }
+
+  Future<void> deleteMergedAudioExport(String path) async {
+    final exportDir = Directory('${(await appDir).path}/exports').absolute;
+    final file = File(path).absolute;
+    if (file.parent.path != exportDir.path ||
+        !(file.path.toLowerCase().endsWith('.mp3') ||
+            file.path.toLowerCase().endsWith('.m4a'))) {
+      throw ArgumentError('无效的合并音频路径。');
+    }
+    if (await file.exists()) await file.delete();
   }
 
   bool _hasValidSpeech(String text) =>

@@ -1,4 +1,7 @@
+import 'dart:math';
+
 import 'project.dart';
+import 'conversation_view_mode.dart';
 
 class AppSettings {
   AppSettings({
@@ -13,8 +16,24 @@ class AppSettings {
     this.playbackSpeed = 1.0,
     this.skipBlankOnPlayback = true,
     this.dialogStyleId = 'spar',
+    this.dialogueInputMode = 'topic',
     this.lastDialogueInput = '',
-  });
+    this.lastDialogueUrl = '',
+    this.lastDialogueFilePath = '',
+    this.lastDialogueFileName = '',
+    this.lastDialogueFileSize = 0,
+    this.conversationViewMode = ConversationViewMode.chat,
+    this.workspaceCollapsed = false,
+    int? hostAvatarSeed,
+    int? guestAvatarSeed,
+    this.hostAvatarPath = '',
+    this.guestAvatarPath = '',
+  }) : hostAvatarSeed = hostAvatarSeed ?? newAvatarSeed(),
+       guestAvatarSeed = guestAvatarSeed ?? newAvatarSeed() {
+    while (this.guestAvatarSeed == this.hostAvatarSeed) {
+      this.guestAvatarSeed = newAvatarSeed();
+    }
+  }
 
   String hostName;
   String guestName;
@@ -27,7 +46,20 @@ class AppSettings {
   double playbackSpeed;
   bool skipBlankOnPlayback;
   String dialogStyleId;
+  String dialogueInputMode;
   String lastDialogueInput;
+  String lastDialogueUrl;
+  String lastDialogueFilePath;
+  String lastDialogueFileName;
+  int lastDialogueFileSize;
+  ConversationViewMode conversationViewMode;
+  bool workspaceCollapsed;
+  int hostAvatarSeed;
+  int guestAvatarSeed;
+  String hostAvatarPath;
+  String guestAvatarPath;
+
+  static int newAvatarSeed() => Random.secure().nextInt(0x7fffffff);
 
   factory AppSettings.fromProject(BanterProject project) => AppSettings(
     hostName: project.hostName,
@@ -52,7 +84,20 @@ class AppSettings {
     playbackSpeed: (json['playbackSpeed'] as num?)?.toDouble() ?? 1.0,
     skipBlankOnPlayback: json['skipBlankOnPlayback'] as bool? ?? true,
     dialogStyleId: json['dialogStyleId'] as String? ?? 'spar',
+    dialogueInputMode: json['dialogueInputMode'] as String? ?? 'topic',
     lastDialogueInput: json['lastDialogueInput'] as String? ?? '',
+    lastDialogueUrl: json['lastDialogueUrl'] as String? ?? '',
+    lastDialogueFilePath: json['lastDialogueFilePath'] as String? ?? '',
+    lastDialogueFileName: json['lastDialogueFileName'] as String? ?? '',
+    lastDialogueFileSize: (json['lastDialogueFileSize'] as num?)?.toInt() ?? 0,
+    conversationViewMode: ConversationViewMode.fromId(
+      json['conversationViewMode'] as String?,
+    ),
+    workspaceCollapsed: json['workspaceCollapsed'] as bool? ?? false,
+    hostAvatarSeed: (json['hostAvatarSeed'] as num?)?.toInt(),
+    guestAvatarSeed: (json['guestAvatarSeed'] as num?)?.toInt(),
+    hostAvatarPath: json['hostAvatarPath'] as String? ?? '',
+    guestAvatarPath: json['guestAvatarPath'] as String? ?? '',
   );
 
   Map<String, dynamic> toJson() => {
@@ -62,12 +107,22 @@ class AppSettings {
     'guestVoiceId': guestVoiceId,
     'appKey': appKey,
     'accessToken': accessToken,
-    'geminiApiKey': geminiApiKey,
     'geminiModel': geminiModel,
     'playbackSpeed': playbackSpeed,
     'skipBlankOnPlayback': skipBlankOnPlayback,
     'dialogStyleId': dialogStyleId,
+    'dialogueInputMode': dialogueInputMode,
     'lastDialogueInput': lastDialogueInput,
+    'lastDialogueUrl': lastDialogueUrl,
+    'lastDialogueFilePath': lastDialogueFilePath,
+    'lastDialogueFileName': lastDialogueFileName,
+    'lastDialogueFileSize': lastDialogueFileSize,
+    'conversationViewMode': conversationViewMode.id,
+    'workspaceCollapsed': workspaceCollapsed,
+    'hostAvatarSeed': hostAvatarSeed,
+    'guestAvatarSeed': guestAvatarSeed,
+    'hostAvatarPath': hostAvatarPath,
+    'guestAvatarPath': guestAvatarPath,
   };
 
   void applyNamesTo(BanterProject project) {

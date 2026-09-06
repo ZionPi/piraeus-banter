@@ -64,3 +64,7 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    implementation("androidx.media3:media3-transformer:1.11.0")
+}
