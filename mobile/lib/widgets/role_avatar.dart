@@ -59,14 +59,6 @@ class GeneratedRoleAvatarPainter extends CustomPainter {
     Color(0xFFF08080),
     Color(0xFFFFDAB9),
   ];
-  static const skins = [
-    Color(0xFFFFE0BD),
-    Color(0xFFFFCD94),
-    Color(0xFFF1C27D),
-    Color(0xFFE0AC69),
-    Color(0xFFC68642),
-    Color(0xFF8D5524),
-  ];
   static const hairColors = [
     Color(0xFF161616),
     Color(0xFF4A2C21),
@@ -98,11 +90,32 @@ void paintGeneratedRoleAvatar(
   int seed, {
   double clipRadius = 0,
 }) {
-  final random = Random(seed);
   canvas.save();
   canvas.clipRRect(RRect.fromRectAndRadius(rect, Radius.circular(clipRadius)));
   canvas.translate(rect.left, rect.top);
   canvas.scale(rect.width / 200, rect.height / 200);
+  canvas.drawPicture(_avatarPicture(seed));
+  canvas.restore();
+}
+
+final _avatarPictures = <int, ui.Picture>{};
+
+ui.Picture _avatarPicture(int seed) {
+  final cached = _avatarPictures[seed];
+  if (cached != null) return cached;
+  if (_avatarPictures.length >= 24) {
+    final oldest = _avatarPictures.keys.first;
+    _avatarPictures.remove(oldest)?.dispose();
+  }
+  final recorder = ui.PictureRecorder();
+  _paintAvatar(Canvas(recorder), seed);
+  final picture = recorder.endRecording();
+  _avatarPictures[seed] = picture;
+  return picture;
+}
+
+void _paintAvatar(Canvas canvas, int seed) {
+  final random = Random(seed);
   canvas.drawRect(
     const Rect.fromLTWH(0, 0, 200, 200),
     Paint()
@@ -112,86 +125,160 @@ void paintGeneratedRoleAvatar(
           )],
   );
 
-  final center = Offset(
-    100 + _between(random, -8, 8),
-    108 + _between(random, -5, 8),
-  );
-  final faceWidth = _between(random, 105, 150);
-  final faceHeight = _between(random, 128, 172);
-  final facePoints = _facePoints(random, center, faceWidth, faceHeight);
-  final face = _smoothClosedPath(facePoints);
-  canvas.drawPath(
-    face,
-    Paint()
-      ..color = GeneratedRoleAvatarPainter
-          .skins[random.nextInt(GeneratedRoleAvatarPainter.skins.length)],
-  );
+  // Adapted from txstc55/ugly-avatar: two independently generated contours
+  // are rotated into each other. This is the main source of its wide variety.
+  final geometry = _generateFaceGeometry(random);
+  final center = const Offset(100, 100);
+  final faceWidth = geometry.width;
+  final faceHeight = geometry.height;
+  final facePoints = geometry.points
+      .map((point) => point + center)
+      .toList(growable: false);
+  final face = _polylinePath(facePoints, close: true);
+  canvas.drawPath(face, Paint()..color = const Color(0xFFFFC9A9));
   _drawRoughPath(canvas, face, width: 3.2);
 
-  final eyeY = center.dy - faceHeight * _between(random, .12, .19);
-  final eyeGap = faceWidth * _between(random, .17, .23);
+  final eyeY = center.dy - faceHeight * _between(random, .12, .18);
+  final eyeGap = faceWidth * _between(random, .21, .25);
   final gazeX = _between(random, -3.5, 3.5);
   _drawEye(
     canvas,
     random,
     Offset(center.dx - eyeGap, eyeY + _between(random, -5, 4)),
-    _between(random, 23, 39),
+    faceWidth * _between(random, .20, .34),
     gazeX,
   );
   _drawEye(
     canvas,
     random,
     Offset(center.dx + eyeGap, eyeY + _between(random, -4, 6)),
-    _between(random, 20, 42),
+    faceWidth * _between(random, .16, .38),
     gazeX,
   );
   _drawNose(canvas, random, center, faceHeight);
   _drawMouth(canvas, random, center, faceWidth, faceHeight);
   _drawHair(canvas, random, facePoints, center, faceWidth, faceHeight);
-  canvas.restore();
 }
 
-List<Offset> _facePoints(
+class _FaceGeometry {
+  const _FaceGeometry(this.points, this.width, this.height);
+
+  final List<Offset> points;
+  final double width;
+  final double height;
+}
+
+_FaceGeometry _generateFaceGeometry(Random random) {
+  const segments = 52;
+  final first = _randomContour(
+    random,
+    width: _between(random, 50, 100),
+    height: _between(random, 70, 100),
+    rectangularChance: .10,
+  );
+  final second = _randomContour(
+    random,
+    width: _between(random, 70, 100),
+    height: _between(random, 50, 80),
+    rectangularChance: .30,
+  );
+  final firstShift = Offset(_between(random, -5, 5), _between(random, -15, 15));
+  final secondShift = Offset(_between(random, -5, 25), _between(random, -5, 5));
+  final quarter = segments;
+  final points = <Offset>[];
+  for (var index = 0; index < first.length; index++) {
+    final a = first[index] + firstShift;
+    final b = second[(index + quarter) % second.length] + secondShift;
+    points.add(Offset(a.dx * .7 + b.dy * .3, a.dy * .7 - b.dx * .3));
+  }
+  final center = points.reduce((a, b) => a + b) / points.length.toDouble();
+  final centered = points.map((point) => point - center).toList();
+  final width = (centered.first.dx - centered[centered.length ~/ 2].dx).abs();
+  final height =
+      (centered[centered.length ~/ 4].dy -
+              centered[centered.length * 3 ~/ 4].dy)
+          .abs();
+  return _FaceGeometry(centered, width, height);
+}
+
+List<Offset> _randomContour(
+  Random random, {
+  required double width,
+  required double height,
+  required double rectangularChance,
+}) {
+  if (random.nextDouble() < rectangularChance) {
+    return _rectangularContour(random, width, height);
+  }
+  final taper = _between(random, .001, .005) * (random.nextBool() ? 1 : -1);
+  return _eggContour(random, width, height, taper);
+}
+
+List<Offset> _eggContour(
   Random random,
-  Offset center,
   double width,
   double height,
+  double taper,
 ) {
+  const segments = 52;
   final points = <Offset>[];
-  final squareBias = random.nextDouble() < .18
-      ? _between(random, .35, .65)
-      : 0.0;
-  final taper = _between(random, -.22, .22);
-  final phase = _between(random, 0, pi * 2);
-  for (var i = 0; i < 72; i++) {
-    final angle = i / 72 * pi * 2;
-    final x = cos(angle);
-    final y = sin(angle);
-    final roundedX = x.sign * pow(x.abs(), 1 - squareBias).toDouble();
-    final roundedY = y.sign * pow(y.abs(), 1 - squareBias).toDouble();
-    final wobble =
-        sin(angle * 3 + phase) * _between(random, 1.2, 3.6) +
-        sin(angle * 7 - phase) * _between(random, .4, 1.8);
-    points.add(
-      Offset(
-        center.dx + roundedX * width / 2 * (1 + taper * y) + wobble,
-        center.dy + roundedY * height / 2 + _between(random, -1.3, 1.3),
-      ),
-    );
+  void addQuadrant(int xSign, int ySign, bool reverse) {
+    for (var step = 0; step < segments; step++) {
+      final index = reverse ? segments - step : step;
+      final angle =
+          pi / 2 / segments * index +
+          _between(random, -pi / 1.1 / segments, pi / 1.1 / segments);
+      final y = sin(angle) * height * ySign;
+      final inside = ((1 - y * y / (height * height)) / (1 + taper * y)).clamp(
+        0.0,
+        double.infinity,
+      );
+      final x = sqrt(inside * width * width) * xSign;
+      points.add(Offset(x + _between(random, -width / 200, width / 200), y));
+    }
   }
+
+  addQuadrant(1, 1, false);
+  addQuadrant(-1, 1, true);
+  addQuadrant(-1, -1, false);
+  addQuadrant(1, -1, true);
   return points;
 }
 
-Path _smoothClosedPath(List<Offset> points) {
-  final path = Path();
-  final first = Offset.lerp(points.last, points.first, .5)!;
-  path.moveTo(first.dx, first.dy);
-  for (var i = 0; i < points.length; i++) {
-    final point = points[i];
-    final midpoint = Offset.lerp(point, points[(i + 1) % points.length], .5)!;
-    path.quadraticBezierTo(point.dx, point.dy, midpoint.dx, midpoint.dy);
+List<Offset> _rectangularContour(Random random, double width, double height) {
+  const segments = 52;
+  final points = <Offset>[];
+  void addQuadrant(int xSign, int ySign, bool reverse) {
+    for (var step = 0; step < segments; step++) {
+      final index = reverse ? segments - step : step;
+      final angle =
+          pi / 2 / segments * index +
+          _between(random, -pi / 11 / segments, pi / 11 / segments);
+      final slope = tan(angle.clamp(0, pi / 2));
+      final yAtSide = slope * width;
+      final point = yAtSide < height
+          ? Offset(width, yAtSide)
+          : Offset(slope.abs() < .0001 ? width : height / slope, height);
+      points.add(Offset(point.dx * xSign, point.dy * ySign));
+    }
   }
-  return path..close();
+
+  addQuadrant(1, 1, false);
+  addQuadrant(-1, 1, true);
+  addQuadrant(-1, -1, false);
+  addQuadrant(1, -1, true);
+  return points;
+}
+
+Path _polylinePath(List<Offset> points, {bool close = false}) {
+  final path = Path();
+  if (points.isEmpty) return path;
+  path.moveTo(points.first.dx, points.first.dy);
+  for (final point in points.skip(1)) {
+    path.lineTo(point.dx, point.dy);
+  }
+  if (close) path.close();
+  return path;
 }
 
 void _drawEye(
@@ -328,61 +415,131 @@ void _drawHair(
   double faceWidth,
   double faceHeight,
 ) {
-  final color = GeneratedRoleAvatarPainter
+  final baseColor = GeneratedRoleAvatarPainter
       .hairColors[random.nextInt(GeneratedRoleAvatarPainter.hairColors.length)];
-  final style = random.nextInt(5);
-  final count = switch (style) {
-    0 => 8 + random.nextInt(9),
-    1 => 22 + random.nextInt(18),
-    2 => 5 + random.nextInt(6),
-    3 => 35 + random.nextInt(24),
-    _ => 12 + random.nextInt(14),
-  };
-  for (var i = 0; i < count; i++) {
-    final angle = _between(random, pi * 1.03, pi * 1.97);
-    final root =
-        facePoints[((angle / (pi * 2)) * facePoints.length).floor() %
-            facePoints.length];
-    final length = switch (style) {
-      0 => _between(random, 20, 58),
-      1 => _between(random, 8, 27),
-      2 => _between(random, 38, 80),
-      3 => _between(random, 4, 14),
-      _ => _between(random, 14, 44),
-    };
-    final outward = root - center;
-    final direction = outward.distance == 0
-        ? const Offset(0, -1)
-        : outward / outward.distance;
-    final sideways = Offset(-direction.dy, direction.dx);
-    final tip =
-        root +
-        direction * length +
-        sideways * _between(random, -length * .65, length * .65);
-    final control =
-        Offset.lerp(root, tip, .55)! +
-        sideways * _between(random, -faceWidth * .18, faceWidth * .18);
+  final rainbow = random.nextDouble() < .1;
+  final topStart = facePoints.length ~/ 2;
+  final top = facePoints.sublist(topStart);
+  Color strandColor() => rainbow
+      ? GeneratedRoleAvatarPainter.hairColors[random.nextInt(
+          GeneratedRoleAvatarPainter.hairColors.length,
+        )]
+      : baseColor;
+  Offset rootAt(double portion) =>
+      top[(portion.clamp(0.0, .999) * top.length).floor()];
+  void stroke(Path path, {double? width}) {
     canvas.drawPath(
-      Path()
-        ..moveTo(root.dx, root.dy)
-        ..quadraticBezierTo(control.dx, control.dy, tip.dx, tip.dy),
+      path,
       Paint()
-        ..color = color.withValues(alpha: _between(random, .72, 1))
+        ..color = strandColor().withValues(alpha: _between(random, .72, 1))
         ..style = PaintingStyle.stroke
-        ..strokeWidth = _between(random, 1.6, style == 3 ? 3.1 : 4.5)
-        ..strokeCap = StrokeCap.round,
+        ..strokeWidth = width ?? _between(random, .7, 3.2)
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
     );
   }
-  if (style == 4) {
-    final fringe = Path()
-      ..moveTo(center.dx - faceWidth * .38, center.dy - faceHeight * .34)
-      ..quadraticBezierTo(
-        center.dx - faceWidth * .05,
-        center.dy - faceHeight * .58,
-        center.dx + faceWidth * .37,
-        center.dy - faceHeight * .3,
+
+  var drewHair = false;
+
+  // Paired contour arcs: strands jump between distant roots on the head.
+  if (random.nextDouble() > .3) {
+    drewHair = true;
+    final count = 10 + random.nextInt(48);
+    for (var index = 0; index < count; index++) {
+      final start = rootAt(_between(random, .04, .72));
+      final end = rootAt(_between(random, .28, .96));
+      final lift = _between(random, 8, faceHeight * .46);
+      final sideways = _between(random, -faceWidth * .30, faceWidth * .30);
+      stroke(
+        Path()
+          ..moveTo(start.dx, start.dy)
+          ..quadraticBezierTo(
+            (start.dx + end.dx) / 2 + sideways,
+            min(start.dy, end.dy) - lift,
+            end.dx,
+            end.dy,
+          ),
       );
-    _drawRoughPath(canvas, fringe, width: 5, color: color);
+    }
+  }
+
+  // Loose scribbles use unrelated contour points, matching the source's
+  // high-order random Bezier family.
+  if (random.nextDouble() > .3) {
+    drewHair = true;
+    final count = 8 + random.nextInt(30);
+    for (var index = 0; index < count; index++) {
+      final a = rootAt(random.nextDouble());
+      final b = rootAt(random.nextDouble());
+      final c = rootAt(random.nextDouble());
+      final d = rootAt(random.nextDouble());
+      stroke(
+        Path()
+          ..moveTo(a.dx, a.dy)
+          ..cubicTo(
+            b.dx + _between(random, -18, 18),
+            b.dy - _between(random, 0, 28),
+            c.dx + _between(random, -18, 18),
+            c.dy - _between(random, 0, 28),
+            d.dx,
+            d.dy,
+          ),
+      );
+    }
+  }
+
+  // Dense outward tufts can be short, long, reversed, or swept sideways.
+  if (random.nextDouble() > .5 || !drewHair) {
+    drewHair = true;
+    final count = 14 + random.nextInt(82);
+    final split = random.nextDouble();
+    for (var index = 0; index < count; index++) {
+      final portion = count == 1 ? .5 : index / (count - 1);
+      final root = rootAt(portion);
+      final outward = root - center;
+      final direction = outward.distance == 0
+          ? const Offset(0, -1)
+          : outward / outward.distance;
+      final sideways = Offset(-direction.dy, direction.dx);
+      final length = _between(random, 8, faceHeight * .72);
+      final sweep = portion < split ? -1.0 : 1.0;
+      final tip =
+          root +
+          direction * length * _between(random, .55, 1.35) +
+          sideways * length * _between(random, -.45, .85) * sweep;
+      final control =
+          Offset.lerp(root, tip, _between(random, .30, .72))! +
+          sideways * _between(random, -faceWidth * .24, faceWidth * .24);
+      stroke(
+        Path()
+          ..moveTo(root.dx, root.dy)
+          ..quadraticBezierTo(control.dx, control.dy, tip.dx, tip.dy),
+      );
+    }
+  }
+
+  // A fourth family adds occasional long crossing locks independently.
+  if (random.nextDouble() > .5) {
+    final count = 8 + random.nextInt(38);
+    for (var index = 0; index < count; index++) {
+      final root = rootAt(random.nextDouble());
+      final opposite = rootAt(1 - random.nextDouble());
+      final tip = Offset(
+        opposite.dx + _between(random, -faceWidth * .35, faceWidth * .35),
+        opposite.dy + _between(random, -faceHeight * .55, faceHeight * .20),
+      );
+      stroke(
+        Path()
+          ..moveTo(root.dx, root.dy)
+          ..quadraticBezierTo(
+            center.dx + _between(random, -faceWidth * .65, faceWidth * .65),
+            center.dy - _between(random, faceHeight * .18, faceHeight * .75),
+            tip.dx,
+            tip.dy,
+          ),
+        width: _between(random, .6, 2.8),
+      );
+    }
   }
 }
 

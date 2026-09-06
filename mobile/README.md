@@ -28,3 +28,10 @@ Release APK 使用仓库内的 `android/app/upload-keystore.jks` 签名，配置
 
 > 当前签名密码是提交到仓库的非生产默认值，仅用于内部测试和直接分发 APK；正式上架
 > Google Play 或其他商店前，应替换为不提交到仓库的生产签名。
+
+## 第三方说明
+
+内置的随机角色头像生成逻辑改编自 Xuan Tang 的
+[`ugly-avatar`](https://github.com/txstc55/ugly-avatar)，按
+[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) 许可使用。
+该改编属于非商业用途；如果将应用商业化，需先替换这部分实现或取得原作者授权。
