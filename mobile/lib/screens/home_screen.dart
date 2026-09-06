@@ -5,6 +5,7 @@ import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -430,6 +431,63 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             (style) => style.id == selectedStyleId,
             orElse: () => _styles.first,
           );
+          Future<void> pasteInto(TextEditingController target) async {
+            final data = await Clipboard.getData(Clipboard.kTextPlain);
+            final text = data?.text;
+            if (text == null || text.isEmpty) return;
+            target.value = TextEditingValue(
+              text: text,
+              selection: TextSelection.collapsed(offset: text.length),
+            );
+          }
+
+          void submit() {
+            if (selectedInputMode == _DialogueInputMode.topic) {
+              final input = controller.text.trim();
+              if (input.isEmpty) return;
+              Navigator.pop(
+                context,
+                _DialogueGenerateRequest.topic(
+                  input: input,
+                  styleId: selectedStyleId,
+                ),
+              );
+              return;
+            }
+            if (selectedInputMode == _DialogueInputMode.url) {
+              final url = urlController.text.trim();
+              final uri = Uri.tryParse(url);
+              if (uri == null ||
+                  !{'http', 'https'}.contains(uri.scheme) ||
+                  uri.host.isEmpty) {
+                _snack('请输入完整的 http 或 https 网页链接。');
+                return;
+              }
+              Navigator.pop(
+                context,
+                _DialogueGenerateRequest.url(
+                  url: url,
+                  styleId: selectedStyleId,
+                ),
+              );
+              return;
+            }
+            final file = selectedFile;
+            if (file?.path == null) {
+              _snack('请先选择一个文档或图片。');
+              return;
+            }
+            Navigator.pop(
+              context,
+              _DialogueGenerateRequest.file(
+                filePath: file!.path!,
+                fileName: file.name,
+                additionalText: additionalController.text.trim(),
+                styleId: selectedStyleId,
+              ),
+            );
+          }
+
           return Padding(
             padding: EdgeInsets.fromLTRB(
               16,
@@ -452,6 +510,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
+                    FilledButton.icon(
+                      onPressed: submit,
+                      icon: Icon(
+                        selectedInputMode == _DialogueInputMode.file
+                            ? Icons.upload_rounded
+                            : selectedInputMode == _DialogueInputMode.url
+                            ? Icons.language_rounded
+                            : Icons.auto_awesome_rounded,
+                        size: 18,
+                      ),
+                      label: const Text('生成'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(84, 42),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
                     IconButton(
                       onPressed: () => Navigator.pop(context),
                       icon: const Icon(Icons.close_rounded),
@@ -527,23 +602,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           labelText: '关键词或话题',
                           hintText: '例如：能量守恒',
                           alignLabelWithHint: true,
-                          contentPadding: EdgeInsets.fromLTRB(16, 20, 52, 48),
+                          contentPadding: EdgeInsets.fromLTRB(16, 20, 96, 48),
                         ),
                       ),
                       Positioned(
                         right: 10,
                         bottom: 10,
-                        child: IconButton(
-                          onPressed: controller.clear,
-                          icon: const Icon(Icons.close_rounded, size: 20),
-                          tooltip: '清空',
-                          style: IconButton.styleFrom(
-                            minimumSize: const Size.square(36),
-                            maximumSize: const Size.square(36),
-                            padding: EdgeInsets.zero,
-                            backgroundColor: Colors.black26,
-                            foregroundColor: Colors.white70,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              onPressed: () => pasteInto(controller),
+                              icon: const Icon(
+                                Icons.content_paste_rounded,
+                                size: 19,
+                              ),
+                              tooltip: '粘贴',
+                              style: _inputActionButtonStyle(),
+                            ),
+                            const SizedBox(width: 6),
+                            IconButton(
+                              onPressed: controller.clear,
+                              icon: const Icon(Icons.close_rounded, size: 20),
+                              tooltip: '清空',
+                              style: _inputActionButtonStyle(),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -659,87 +743,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           labelText: '网页链接',
                           hintText: 'https://mp.weixin.qq.com/s/...',
                           alignLabelWithHint: true,
-                          contentPadding: EdgeInsets.fromLTRB(16, 20, 52, 48),
+                          contentPadding: EdgeInsets.fromLTRB(16, 20, 96, 48),
                         ),
                       ),
                       Positioned(
                         right: 6,
                         bottom: 6,
-                        child: IconButton(
-                          onPressed: () {
-                            urlController.clear();
-                            _settings.lastDialogueUrl = '';
-                            unawaited(_settingsRepository.save(_settings));
-                          },
-                          icon: const Icon(Icons.close_rounded),
-                          tooltip: '清空网址',
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              onPressed: () => pasteInto(urlController),
+                              icon: const Icon(Icons.content_paste_rounded),
+                              tooltip: '粘贴网址',
+                            ),
+                            IconButton(
+                              onPressed: () {
+                                urlController.clear();
+                                _settings.lastDialogueUrl = '';
+                                unawaited(_settingsRepository.save(_settings));
+                              },
+                              icon: const Icon(Icons.close_rounded),
+                              tooltip: '清空网址',
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: () {
-                    if (selectedInputMode == _DialogueInputMode.topic) {
-                      final input = controller.text.trim();
-                      if (input.isEmpty) return;
-                      Navigator.pop(
-                        context,
-                        _DialogueGenerateRequest.topic(
-                          input: input,
-                          styleId: selectedStyleId,
-                        ),
-                      );
-                      return;
-                    }
-                    if (selectedInputMode == _DialogueInputMode.url) {
-                      final url = urlController.text.trim();
-                      final uri = Uri.tryParse(url);
-                      if (uri == null ||
-                          !{'http', 'https'}.contains(uri.scheme) ||
-                          uri.host.isEmpty) {
-                        _snack('请输入完整的 http 或 https 网页链接。');
-                        return;
-                      }
-                      Navigator.pop(
-                        context,
-                        _DialogueGenerateRequest.url(
-                          url: url,
-                          styleId: selectedStyleId,
-                        ),
-                      );
-                      return;
-                    }
-                    final file = selectedFile;
-                    if (file?.path == null) {
-                      _snack('请先选择一个文档或图片。');
-                      return;
-                    }
-                    Navigator.pop(
-                      context,
-                      _DialogueGenerateRequest.file(
-                        filePath: file!.path!,
-                        fileName: file.name,
-                        additionalText: additionalController.text.trim(),
-                        styleId: selectedStyleId,
-                      ),
-                    );
-                  },
-                  icon: Icon(
-                    selectedInputMode == _DialogueInputMode.file
-                        ? Icons.upload_rounded
-                        : selectedInputMode == _DialogueInputMode.url
-                        ? Icons.language_rounded
-                        : Icons.auto_awesome_rounded,
-                  ),
-                  label: Text(
-                    selectedInputMode == _DialogueInputMode.file
-                        ? '上传并生成'
-                        : selectedInputMode == _DialogueInputMode.url
-                        ? '提取并生成'
-                        : '生成对话',
-                  ),
-                ),
+                const SizedBox(height: 4),
               ],
             ),
           );
@@ -808,6 +840,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     return '${(bytes / 1024).toStringAsFixed(0)} KiB';
   }
+
+  ButtonStyle _inputActionButtonStyle() => IconButton.styleFrom(
+    minimumSize: const Size.square(36),
+    maximumSize: const Size.square(36),
+    padding: EdgeInsets.zero,
+    backgroundColor: Colors.black26,
+    foregroundColor: Colors.white70,
+  );
 
   Future<DialogStyle?> _pickDialogueStyle(String selectedStyleId) {
     return showModalBottomSheet<DialogStyle>(
