@@ -257,40 +257,34 @@ $input
       },
     };
     final uri = ApiConfig.uri('/api/gemini/generate');
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
     late String body;
-    for (var attempt = 0; attempt < 2; attempt++) {
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 20);
-      try {
-        final request = await client.postUrl(uri);
-        request.headers.contentType = ContentType.json;
-        ApiConfig.authorize(request);
-        request.write(jsonEncode({'model': model, 'payload': payload}));
-        final response = await request.close().timeout(
-          const Duration(seconds: 120),
-        );
-        body = await response
-            .transform(utf8.decoder)
-            .join()
-            .timeout(const Duration(seconds: 30));
-        if (response.statusCode >= 200 && response.statusCode < 300) break;
-        final error = GeminiApiException.fromResponse(
-          response.statusCode,
-          body,
-        );
-        if (!_retryableStatus(response.statusCode) || attempt == 1) throw error;
-      } on GeminiApiException {
-        rethrow;
-      } on SocketException catch (error) {
-        if (attempt == 1) throw Exception('无法连接 Gemini：${error.message}');
-      } on HttpException catch (error) {
-        if (attempt == 1) throw Exception('Gemini 连接中断：${error.message}');
-      } on TimeoutException {
-        if (attempt == 1) throw Exception('Gemini 请求超时，请稍后重试。');
-      } finally {
-        client.close(force: true);
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      ApiConfig.authorize(request);
+      request.write(jsonEncode({'model': model, 'payload': payload}));
+      final response = await request.close().timeout(
+        const Duration(seconds: 100),
+      );
+      body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw GeminiApiException.fromResponse(response.statusCode, body);
       }
-      await Future<void>.delayed(Duration(seconds: 1 << attempt));
+    } on GeminiApiException {
+      rethrow;
+    } on SocketException catch (error) {
+      throw Exception('无法连接 Gemini：${error.message}');
+    } on HttpException catch (error) {
+      throw Exception('Gemini 连接中断：${error.message}');
+    } on TimeoutException {
+      throw Exception('Gemini 请求超时，请稍后重试。');
+    } finally {
+      client.close(force: true);
     }
 
     final decoded = jsonDecode(body) as Map<String, dynamic>;
@@ -311,9 +305,6 @@ $input
 
     return parseDialogueJson(text, project);
   }
-
-  bool _retryableStatus(int status) =>
-      status == 408 || status == 502 || status == 504;
 
   String _imageMimeType(String fileName) {
     final lower = fileName.toLowerCase();

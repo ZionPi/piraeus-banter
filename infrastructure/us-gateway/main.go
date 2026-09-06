@@ -110,12 +110,20 @@ func generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	timeout := 90 * time.Second
+	if len(input.Payload) <= 64<<10 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	response, usedModel, err := requestGemini(ctx, input.Model, apiKey, input.Payload)
+	response, err := requestGemini(ctx, input.Model, apiKey, input.Payload)
 	if err != nil {
 		log.Printf("Gemini upstream failed for model %q: %v", input.Model, err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Gemini upstream unavailable"})
+		status := http.StatusBadGateway
+		if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+		writeJSON(w, status, map[string]string{"error": "Gemini upstream unavailable"})
 		return
 	}
 	defer response.Body.Close()
@@ -126,60 +134,23 @@ func generate(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Gemini-Model", usedModel)
+	w.Header().Set("X-Gemini-Model", input.Model)
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(body)
 }
 
-func requestGemini(ctx context.Context, selectedModel, apiKey string, payload []byte) (*http.Response, string, error) {
-	models := fallbackModels(selectedModel)
-	for index, model := range models {
-		target := fmt.Sprintf(
-			"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
-			url.PathEscape(model),
-		)
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
-		if err != nil {
-			return nil, model, err
-		}
-		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("X-Goog-Api-Key", apiKey)
-		response, err := client.Do(request)
-		if err == nil && (!retryable(response.StatusCode) || index == len(models)-1) {
-			return response, model, nil
-		}
-		if err == nil {
-			log.Printf("Gemini model %q returned %d; falling back", model, response.StatusCode)
-			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 32<<10))
-			response.Body.Close()
-		} else {
-			log.Printf("Gemini model %q failed: %v; falling back", model, err)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, model, ctx.Err()
-		default:
-		}
+func requestGemini(ctx context.Context, model, apiKey string, payload []byte) (*http.Response, error) {
+	target := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
+		url.PathEscape(model),
+	)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
 	}
-	return nil, selectedModel, errors.New("all Gemini models failed")
-}
-
-func fallbackModels(selected string) []string {
-	models := []string{selected, "gemini-3.6-flash", "gemini-3.5-flash"}
-	seen := make(map[string]bool, len(models))
-	result := make([]string, 0, len(models))
-	for _, model := range models {
-		if model == "" || seen[model] {
-			continue
-		}
-		seen[model] = true
-		result = append(result, model)
-	}
-	return result
-}
-
-func retryable(status int) bool {
-	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Goog-Api-Key", apiKey)
+	return client.Do(request)
 }
 
 func proxyWarsaw(path string, maxBytes int64) http.HandlerFunc {
@@ -427,13 +398,10 @@ func generateDialogue(ctx context.Context, model, systemPrompt, styleName string
 	if err != nil {
 		return nil, http.StatusInternalServerError, errors.New("failed to build Gemini request")
 	}
-	response, usedModel, err := requestGemini(ctx, model, strings.TrimSpace(os.Getenv("GEMINI_API_KEY")), payload)
+	response, err := requestGemini(ctx, model, strings.TrimSpace(os.Getenv("GEMINI_API_KEY")), payload)
 	if err != nil {
 		log.Printf("Dialogize Gemini upstream failed for model %q: %v", model, err)
 		return nil, http.StatusBadGateway, errors.New("Gemini upstream unavailable")
-	}
-	if usedModel != model {
-		log.Printf("Dialogize used fallback model %q instead of %q", usedModel, model)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))

@@ -13,9 +13,10 @@ conversion tools on the US VPS.
 - `POST /api/convert-to-text`
 - `POST /api/dialogize`
 
-All POST routes require `X-Piraeus-Token`. Gemini generation tries the selected
-non-Lite model once. Retryable upstream failures fall back to
-`gemini-3.6-flash` and then `gemini-3.5-flash`, without retrying the same model.
+All POST routes require `X-Piraeus-Token`. Gemini generation calls only the
+selected non-Lite model and never retries automatically. HTTP failures return
+immediately. Small requests time out after 30 seconds; larger payloads retain a
+90-second limit.
 
 ## Environment
 
